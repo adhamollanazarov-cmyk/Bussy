@@ -1,7 +1,7 @@
 # Bussy — Biznesingiz uchun aqlli yordamchi
 
 **Demo:** https://bussy-git-main-adhamollanazarov-cmyks-projects.vercel.app/
-**Taqdimot (pitch deck):** [BUSSY_pitch_deck.pptx](./BUSSY_pitch_deck.pptx)
+**Taqdimot (pitch deck):** [BUSSY_pitch_deck.pptx](./BUSSY(1).pptx)
 **Xakaton:** Umummilliy AI Xakaton, Xorazm · vazifa №20 (Savdo-sanoat palatasi)
 
 O‘zbekistondagi kichik va o‘rta biznes egalari uchun moliyaviy yordamchi: kredit
