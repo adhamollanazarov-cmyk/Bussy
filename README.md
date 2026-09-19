@@ -1,36 +1,99 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Bussy — Biznesingiz uchun aqlli yordamchi
 
-## Getting Started
+O‘zbekistondagi kichik va o‘rta biznes egalari uchun moliyaviy yordamchi: kredit
+kalkulyatori, foyda va zararsizlik tahlili, soliq hisobi, 11 bo‘limli biznes-reja
+generatori va what-if simulyatori — barchasi o‘zbek tilida.
 
-First, run the development server:
+## Asosiy tamoyil
+
+**Matematika sun’iy intellektdan ajratilgan.** Barcha moliyaviy hisob-kitoblar
+`lib/engine/` ichidagi sof (pure) funksiyalarda bajariladi. AI faqat foydalanuvchi
+savolini tushunadi, kerakli kalkulyatorni chaqiradi va natijani o‘zbek tilida
+tushuntiradi — raqamlarni hech qachon o‘zi o‘ylab topmaydi.
+
+## Ishga tushirish
 
 ```bash
+npm install
+cp .env.example .env.local   # ixtiyoriy, pastga qarang
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Brauzerda [http://localhost:3000](http://localhost:3000) ni oching.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### Muhit o‘zgaruvchilari
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+| O‘zgaruvchi | Majburiy | Tavsif |
+|---|---|---|
+| `OPENAI_API_KEY` | Yo‘q | Bo‘lsa, chat OpenAI (gpt-4o-mini) orqali tool-calling bilan ishlaydi. Bo‘lmasa — `lib/ai/demo-engine.ts` zaxira dvigateli. Ikkala holatda ham matematika bir xil kalkulyatorlarda hisoblanadi. |
 
-## Learn More
+## Skriptlar
 
-To learn more about Next.js, take a look at the following resources:
+| Buyruq | Tavsif |
+|---|---|
+| `npm run dev` | Dev server (Turbopack) |
+| `npm run build` | Production build |
+| `npm start` | Production serverni ishga tushirish |
+| `npm run lint` | ESLint |
+| `npm test` | Vitest (moliyaviy dvigatel testlari) |
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+> **Eslatma — `build` nega `--webpack` bilan ishlaydi?**
+> `next build` Turbopack bilan Windows'da `lightningcss` native modulini yuklay
+> olmay xato beradi (Tailwind v4 + Turbopack muammosi). `next dev` Turbopack bilan
+> normal ishlaydi. Yuqori oqimda tuzatilgach, `package.json` dagi `--webpack`
+> bayrog‘ini olib tashlash mumkin.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Loyiha tuzilishi
 
-## Deploy on Vercel
+```
+app/
+  page.tsx              Landing sahifa
+  api/chat/route.ts     Chat endpoint (validatsiya + rate limit + OpenAI/zaxira)
+  app/                  Ilova sahifalari (dashboard, chat, finance, loan, ...)
+components/
+  charts/               Recharts grafiklari
+  chat/                 Chat xabarlari va hisob-kitob kartochkalari
+  layout/               Sidebar va header
+  ui/                   Button, Card, Input, Badge
+lib/
+  engine/               💡 Moliyaviy dvigatel — sof funksiyalar
+    assumptions.ts      Markazlashtirilgan taxminlar (narx, tannarx, taqsimot)
+    loan.ts             Annuitet kredit + amortizatsiya jadvali
+    profit.ts           Yalpi/sof foyda va marjalar
+    breakeven.ts        Zararsizlik nuqtasi
+    cashflow.ts         Pul oqimi va likvidlik
+    tax.ts              O‘zbekiston soliq rejimlari
+    analyzer.ts         Qarz yuki, g‘oya tahlili, biznes-reja
+  ai/
+    prompts.ts          Tizim ko‘rsatmasi (xavfsizlik qoidalari)
+    tools.ts            OpenAI tool ta'riflari
+    demo-engine.ts      Kalit so'zli zaxira dvigatel
+  store/                Biznes ma'lumoti (localStorage + useSyncExternalStore)
+supabase/schema.sql     ⚠️ Hozircha ulanmagan — pastga qarang
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Testlar
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```bash
+npm test
+```
+
+Testlar `lib/engine/` ni qamrab oladi: annuitet formulasi, zararsizlik nuqtasi,
+soliq moddalarining yig‘indisi, va chat dvigatelining niyat aniqlash tartibi.
+
+## Ma'lum cheklovlar
+
+- **Soliq stavkalari tasdiqlanishi kerak.** `lib/engine/tax.ts` dagi stavkalar
+  umumiy qoidalarga asoslangan. Ishlab chiqarishga chiqarishdan oldin buxgalter
+  ko‘rigidan o‘tkazing. QQS qo‘shilgan qiymatdan hisoblanadi, lekin kirim QQSiga
+  ega xarajatlar ulushi taxminiy (60%).
+- **`supabase/schema.sql` ulanmagan.** Bu kelajakdagi persistensiya uchun loyiha
+  eskizi — hech qayerdan import qilinmaydi va `@supabase/supabase-js` o‘rnatilmagan.
+  Ishlatishdan oldin **har bir jadvalga RLS siyosatlari** qo‘shilishi shart.
+- **Rate limit xotirada.** `app/api/chat/route.ts` dagi cheklov bitta instans uchun
+  ishlaydi. Serverless/ko‘p instansli deployda Redis kabi tashqi hisoblagich kerak.
+- **Autentifikatsiya yo‘q.** Ma'lumotlar faqat brauzer `localStorage` ida saqlanadi.
+
+## Texnologiyalar
+
+Next.js 16 (App Router) · React 19 · TypeScript · Tailwind CSS v4 · Recharts · Zod · Vitest

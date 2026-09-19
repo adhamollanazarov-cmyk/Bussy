@@ -1,26 +1,55 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
+@theme {
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+
+  /* `animate-fade-in` butun ilovada ishlatiladi (chat, kredit, simulyator). */
+  --animate-fade-in: fade-in 0.3s ease-out;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* ===========================================================
+   CHOP ETISH (PDF yuklab olish) uchun uslublar
+   Biznes-reja sahifasi window.print() chaqiradi. App layout'dagi
+   h-screen + overflow-hidden brauzerga faqat bitta ekranni chop
+   ettiradi, shuning uchun bu yerda ularni bekor qilamiz.
+   =========================================================== */
+@media print {
+  html,
+  body {
+    height: auto !important;
+    overflow: visible !important;
+    background: #ffffff !important;
+  }
+
+  /* Layout qatlamlaridagi balandlik/scroll cheklovlarini olib tashlash */
+  [data-app-shell],
+  [data-app-scroll],
+  [data-app-main] {
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  /* Bo'limlar sahifa o'rtasida bo'linib ketmasin */
+  section,
+  table,
+  tr {
+    break-inside: avoid;
+  }
+
+  @page {
+    margin: 16mm;
+  }
 }

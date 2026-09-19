@@ -12,6 +12,11 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Loyihaga aloqasi bo'lmagan Python virtualenv ichidagi .js fayllar
+    // (matplotlib, pygame, sklearn) lint natijasini 120+ ogohlantirish bilan
+    // to'ldirib yuborardi.
+    ".venv/**",
+    "coverage/**",
   ]),
 ]);
 
