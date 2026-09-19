@@ -5,7 +5,7 @@ import { Receipt, ShieldAlert, Check, Calculator } from "lucide-react";
 import { calculateTax, getRegimeCopy, TaxRegimeType, UZ_TAX_REGIMES } from "@/lib/engine/tax";
 import { useBusiness, useSeededState } from "@/lib/store/business-store";
 import { useLanguage } from "@/lib/i18n/language-store";
-import { formatMoney, formatPercent, parseNumberInput } from "@/lib/utils";
+import { formatMoney, formatPercent, parseNumberInput, cn } from "@/lib/utils";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -229,16 +229,28 @@ export default function TaxCalculatorPage() {
                     onChange={(e) => setCustomRate(parseFloat(e.target.value) || 0)}
                     suffix="%"
                   />
-                  <div className="flex gap-2 mt-2">
-                    {[4, 1, 2].map((r) => (
-                      <button
-                        key={r}
-                        onClick={() => setCustomRate(r)}
-                        className="text-[10px] px-2.5 py-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium"
-                      >
-                        {r}% {r === 4 ? t.tax.turnoverRateStandard : t.tax.turnoverRatePreferential}
-                      </button>
-                    ))}
+                  <div className="flex gap-2 mt-2" role="radiogroup" aria-label={t.tax.turnoverRateLabel}>
+                    {[4, 1, 2].map((r) => {
+                      // customRate berilmagan bo'lsa standart 4% tanlangan hisoblanadi
+                      const isActive = (customRate ?? 4) === r;
+                      return (
+                        <button
+                          key={r}
+                          type="button"
+                          role="radio"
+                          aria-checked={isActive}
+                          onClick={() => setCustomRate(r)}
+                          className={cn(
+                            "text-[10px] px-2.5 py-1 rounded font-medium transition-colors",
+                            isActive
+                              ? "bg-slate-900 text-white shadow-xs"
+                              : "bg-slate-100 hover:bg-slate-200 text-slate-700"
+                          )}
+                        >
+                          {r}% {r === 4 ? t.tax.turnoverRateStandard : t.tax.turnoverRatePreferential}
+                        </button>
+                      );
+                    })}
                   </div>
                   <p className="mt-1.5 text-[10px] text-slate-400 leading-relaxed">
                     {t.tax.turnoverRateFootnote}
@@ -304,9 +316,26 @@ export default function TaxCalculatorPage() {
             <CardContent>
               <div className="divide-y divide-slate-100 text-xs">
                 {taxResult.breakdown.map((item, idx) => (
-                  <div key={idx} className="py-2.5 flex justify-between items-center">
-                    <span className="text-slate-700 font-medium">{item.label}</span>
-                    <span className="text-slate-900 font-bold">{formatMoney(item.amount)}</span>
+                  <div key={idx} className="py-2.5 flex justify-between items-start gap-3">
+                    <div className="min-w-0">
+                      <span className="text-slate-700 font-medium">{item.label}</span>
+                      <p className="mt-1 text-[11px] text-slate-500">
+                        {t.tax.rateEffectiveFrom.replace("{date}", item.source.effectiveFrom)}
+                      </p>
+                      {item.source.legalBasis.trim() ? (
+                        <a
+                          href={item.source.legalBasis}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="mt-1 block text-[11px] text-emerald-700 underline break-words"
+                        >
+                          {t.tax.rateLegalBasis}
+                        </a>
+                      ) : (
+                        <p className="mt-1 text-[11px] text-amber-700">{t.tax.ratePendingVerification}</p>
+                      )}
+                    </div>
+                    <span className="text-slate-900 font-bold shrink-0">{formatMoney(item.amount)}</span>
                   </div>
                 ))}
                 <div className="py-2.5 flex justify-between items-center font-bold text-slate-900">

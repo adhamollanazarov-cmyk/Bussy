@@ -1,4 +1,5 @@
 import type { Locale } from "../i18n/translations";
+import { TAX_SOURCES, type TaxSource } from "./tax-sources";
 
 export type TaxRegimeType = "turnover" | "general" | "individual";
 
@@ -103,7 +104,7 @@ export interface TaxCalculationResult {
   taxAmount: number;
   effectiveTaxRate: number;
   profitAfterTax: number;
-  breakdown: { label: string; amount: number }[];
+  breakdown: { label: string; amount: number; source: TaxSource }[];
   isDemo: boolean;
   disclaimer: string;
   /** Hisob-kitobda ishlatilgan taxminlar — foydalanuvchiga ko‘rsatish uchun. */
@@ -160,6 +161,7 @@ export function calculateTax(
             ? `Tax on total revenue (${rate}%)`
             : `Jami tushumdan soliq (${rate}%)`,
         amount: Math.round(taxBase * (rate / 100)),
+        source: TAX_SOURCES.turnover,
       },
     ];
     const taxAmount = sumBreakdown(breakdown);
@@ -234,24 +236,28 @@ export function calculateTax(
             {
               label: `Profit tax (${profitTaxRate}%)`,
               amount: Math.round(profitTax),
+              source: TAX_SOURCES.profit,
             },
             {
               label: isVatInclusive
                 ? `VAT — output minus input (${vatRate}/${100 + vatRate})`
                 : `VAT — on value added (${vatRate}%)`,
               amount: Math.round(netVat),
+              source: TAX_SOURCES.vat,
             },
           ]
         : [
             {
               label: `Foyda solig‘i (${profitTaxRate}%)`,
               amount: Math.round(profitTax),
+              source: TAX_SOURCES.profit,
             },
             {
               label: isVatInclusive
                 ? `QQS — chiqim minus kirim (${vatRate}/${100 + vatRate})`
                 : `QQS — qo‘shilgan qiymatdan (${vatRate}%)`,
               amount: Math.round(netVat),
+              source: TAX_SOURCES.vat,
             },
           ];
     const taxAmount = sumBreakdown(breakdown);
@@ -311,20 +317,23 @@ export function calculateTax(
   const breakdown =
     locale === "en"
       ? [
-          { label: "Fixed monthly tax", amount: Math.round(fixedAmount) },
+          { label: "Fixed monthly tax", amount: Math.round(fixedAmount), source: TAX_SOURCES.individual },
           {
             label: "Social tax (base unit calculation)",
             amount: Math.round(socialTax),
+            source: TAX_SOURCES.social,
           },
         ]
       : [
           {
             label: "Oylik qat'iy belgilangan soliq",
             amount: Math.round(fixedAmount),
+            source: TAX_SOURCES.individual,
           },
           {
             label: "Ijtimoiy soliq (1 BHM bazaviy hisob)",
             amount: Math.round(socialTax),
+            source: TAX_SOURCES.social,
           },
         ];
   // Ilgari ijtimoiy soliq jadvalda ko'rsatilardi, lekin jamiga qo'shilmasdi —

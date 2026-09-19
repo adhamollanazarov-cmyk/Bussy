@@ -18,12 +18,18 @@ import { calculateBreakEven } from "@/lib/engine/breakeven";
 import { calculateCashflow } from "@/lib/engine/cashflow";
 import {
   COST_SPLIT,
+  DAYS_PER_MONTH,
   DEFAULT_TURNOVER_TAX_PERCENT,
   resolveUnitEconomics,
 } from "@/lib/engine/assumptions";
 import { useBusiness } from "@/lib/store/business-store";
 import { useLanguage } from "@/lib/i18n/language-store";
-import { formatMoney, formatPercent, safeRatioPercent } from "@/lib/utils";
+import {
+  formatMoney,
+  formatPercent,
+  safeRatioPercent,
+  classifyBreakEven,
+} from "@/lib/utils";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -53,6 +59,19 @@ export default function WhatIfSimulatorPage() {
     () => resolveUnitEconomics(business.type, locale),
     [business.type, locale]
   );
+
+  const percentFormatter = new Intl.NumberFormat(locale, { style: "percent" });
+  const assumptions = [
+    t.calculationAssumptions.costSplit
+      .replace("{fixed}", percentFormatter.format(COST_SPLIT.fixed))
+      .replace("{variable}", percentFormatter.format(COST_SPLIT.variable)),
+    t.calculationAssumptions.daysPerMonth.replace("{days}", String(DAYS_PER_MONTH)),
+    t.calculationAssumptions.unitEconomics
+      .replace("{type}", unitEconomics.displayName)
+      .replace("{price}", formatMoney(unitEconomics.sellingPrice))
+      .replace("{cost}", formatMoney(unitEconomics.variableCostPerUnit)),
+    t.calculationAssumptions.simulatorAdjustments,
+  ];
 
   // Baseline hisob — foyda ham kalkulyator orqali, inline formula bilan emas
   const baseLoanRes = useMemo(
@@ -142,6 +161,12 @@ export default function WhatIfSimulatorPage() {
       variableCostPerUnit: unitEconomics.variableCostPerUnit * (costMultiplier / 100),
     });
   }, [simulatedFixedCost, priceMultiplier, costMultiplier, unitEconomics]);
+
+  // Slayderlar narxni tannarxdan pastga tushira oladi — o'shanda zararsizlik
+  // "0 ta" emas, "erishib bo'lmaydi" bo'lishi kerak. O'zgarmas xarajat nol
+  // bo'lgan holat esa butunlay boshqa xabar beradi.
+  const baseBreakEvenStatus = classifyBreakEven(baseBreakEvenRes);
+  const simBreakEvenStatus = classifyBreakEven(simBreakEvenRes);
 
   // Farqlar (Delta)
   const profitDelta = simProfitRes.netProfit - baseProfitRes.netProfit;
@@ -284,15 +309,39 @@ export default function WhatIfSimulatorPage() {
             <span className="font-semibold uppercase tracking-wider">{t.simulator.cardBreakEven}</span>
             <Target className="h-4 w-4 text-purple-600" />
           </div>
-          <div className="text-2xl font-extrabold text-slate-900">
-            {simBreakEvenRes.breakEvenUnits.toLocaleString(locale === "en" ? "en-US" : "ru-RU")}
-            {locale === "uz" ? " ta" : ""}
-          </div>
-          <div className="mt-2 text-xs text-slate-500">
-            {t.simulator.cardBreakEvenSub
-              .replace("{daily}", String(simBreakEvenRes.dailyUnits))
-              .replace("{unit}", unitEconomics.unitLabel)}
-          </div>
+          {simBreakEvenStatus === "unreachable" ? (
+            <>
+              <div className="text-lg font-extrabold text-rose-700">
+                {t.breakEven.unreachableShort}
+              </div>
+              <div className="mt-2 text-xs text-slate-600 leading-relaxed">
+                {t.breakEven.unreachableBody
+                  .replace("{price}", formatMoney(simBreakEvenRes.sellingPrice))
+                  .replace("{cost}", formatMoney(simBreakEvenRes.variableCostPerUnit))}
+              </div>
+            </>
+          ) : simBreakEvenStatus === "noFixedCost" ? (
+            <>
+              <div className="text-lg font-extrabold text-emerald-700">
+                {t.breakEven.noFixedCostShort}
+              </div>
+              <div className="mt-2 text-xs text-slate-600 leading-relaxed">
+                {t.breakEven.noFixedCostBody}
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="text-2xl font-extrabold text-slate-900">
+                {simBreakEvenRes.breakEvenUnits.toLocaleString(locale === "en" ? "en-US" : "ru-RU")}
+                {locale === "uz" ? " ta" : ""}
+              </div>
+              <div className="mt-2 text-xs text-slate-500">
+                {t.simulator.cardBreakEvenSub
+                  .replace("{daily}", String(simBreakEvenRes.dailyUnits))
+                  .replace("{unit}", unitEconomics.unitLabel)}
+              </div>
+            </>
+          )}
         </div>
       </div>
 
@@ -482,12 +531,28 @@ export default function WhatIfSimulatorPage() {
                       {t.simulator.rowBreakEven.replace("{unit}", unitEconomics.unitLabel)}
                     </td>
                     <td className="py-2.5 text-right font-medium">
-                      {baseBreakEvenRes.breakEvenUnits.toLocaleString(locale === "en" ? "en-US" : "ru-RU")}
-                      {locale === "uz" ? " ta" : ""}
+                      {baseBreakEvenStatus === "unreachable" ? (
+                        <span className="text-rose-600">{t.breakEven.unreachableShort}</span>
+                      ) : baseBreakEvenStatus === "noFixedCost" ? (
+                        <span className="text-slate-500">{t.breakEven.noFixedCostShort}</span>
+                      ) : (
+                        <>
+                          {baseBreakEvenRes.breakEvenUnits.toLocaleString(locale === "en" ? "en-US" : "ru-RU")}
+                          {locale === "uz" ? " ta" : ""}
+                        </>
+                      )}
                     </td>
                     <td className="py-2.5 text-right font-bold text-purple-700">
-                      {simBreakEvenRes.breakEvenUnits.toLocaleString(locale === "en" ? "en-US" : "ru-RU")}
-                      {locale === "uz" ? " ta" : ""}
+                      {simBreakEvenStatus === "unreachable" ? (
+                        <span className="text-rose-600">{t.breakEven.unreachableShort}</span>
+                      ) : simBreakEvenStatus === "noFixedCost" ? (
+                        <span className="text-slate-500">{t.breakEven.noFixedCostShort}</span>
+                      ) : (
+                        <>
+                          {simBreakEvenRes.breakEvenUnits.toLocaleString(locale === "en" ? "en-US" : "ru-RU")}
+                          {locale === "uz" ? " ta" : ""}
+                        </>
+                      )}
                     </td>
                   </tr>
                 </tbody>
@@ -495,6 +560,15 @@ export default function WhatIfSimulatorPage() {
             </CardContent>
           </Card>
         </div>
+      </div>
+      <div className="text-[11px] text-slate-500 space-y-1">
+        <h3 className="text-sm font-bold text-slate-900">{t.calculationAssumptions.heading}</h3>
+        {assumptions.map((asm, i) => (
+          <p key={i} className="flex items-center gap-1.5">
+            <span className="inline-block w-1.5 h-1.5 rounded-full bg-slate-400 shrink-0"></span>
+            <span>{asm}</span>
+          </p>
+        ))}
       </div>
     </div>
   );

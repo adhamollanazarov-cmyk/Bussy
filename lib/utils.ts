@@ -69,6 +69,37 @@ export function toNumber(value: unknown): number {
   return 0;
 }
 
+/**
+ * Zararsizlik natijasini KO'RSATISH uchun tasniflash.
+ *
+ * `calculateBreakEven` ikkita butunlay boshqa holatda ham `breakEvenUnits: 0`
+ * qaytaradi, sahifalar esa ikkalasini "0 ta" deb chizardi — foydalanuvchi buni
+ * "nol sotuvdan qoplanadi" deb o'qiydi, holbuki birinchi holatda zararsizlikka
+ * umuman erishib bo'lmaydi.
+ *
+ * DIQQAT: bu ikki holatni `contributionMargin` bo'yicha AJRATIB BO'LMAYDI —
+ * `breakeven.ts` erta qaytishda uni har ikkalasida ham 0 ga tenglashtiradi.
+ * Shuning uchun kirish qiymatlari bo'yicha ajratamiz: ular erta qaytishda
+ * o'zgarishsiz qaytariladi.
+ *
+ * Dvigatel tiplari o'zgarmaydi — bu faqat ko'rsatish qatlami.
+ */
+export type BreakEvenStatus = "ok" | "unreachable" | "noFixedCost";
+
+export function classifyBreakEven(result: {
+  fixedCost: number;
+  sellingPrice: number;
+  variableCostPerUnit: number;
+}): BreakEvenStatus {
+  // Narx tannarxdan past yoki teng — har bir sotuv zarar keltiradi va
+  // zararsizlikka hech qachon yetib bo'lmaydi. Birinchi tekshiriladi:
+  // o'zgarmas xarajat nol bo'lganda ham asosiy muammo shu bo'lib qoladi.
+  if (result.sellingPrice <= result.variableCostPerUnit) return "unreachable";
+  // O'zgarmas xarajat yo'q — zararsizlik birinchi sotuvdayoq bosib o'tiladi.
+  if (result.fixedCost <= 0) return "noFixedCost";
+  return "ok";
+}
+
 export function parseNumberInput(str: string | number): number {
   if (typeof str === "number") return isNaN(str) ? 0 : str;
   if (!str) return 0;

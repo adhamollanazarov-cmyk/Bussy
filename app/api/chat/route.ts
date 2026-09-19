@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { processWithSmartDemoEngine, detectIntent } from "@/lib/ai/demo-engine";
 import { getSystemPrompt } from "@/lib/ai/prompts";
 import { BUSSY_TOOLS } from "@/lib/ai/tools";
-import { runTool, type ToolArgs } from "@/lib/ai/run-tool";
-import type { Locale } from "@/lib/i18n/translations";
+import { runTool, getToolResultForModel, type ToolArgs } from "@/lib/ai/run-tool";
+import { DEFAULT_LOCALE, translations, type Locale } from "@/lib/i18n/translations";
 import {
   MAX_AGENT_STEPS,
   ChatRequestSchema,
@@ -156,7 +156,7 @@ async function runAgent(
           role: "tool",
           tool_call_id: call.id,
           content: JSON.stringify({
-            error: `Noma'lum hisoblash vositasi: ${call.function.name}`,
+            error: translations[locale].chatErrors.unknownTool.replace("{tool}", call.function.name),
           }),
         });
         continue;
@@ -168,7 +168,7 @@ async function runAgent(
       messages.push({
         role: "tool",
         tool_call_id: call.id,
-        content: JSON.stringify(output),
+        content: JSON.stringify(getToolResultForModel(call.function.name, output)),
       });
     }
   }
@@ -181,21 +181,29 @@ async function runAgent(
    ============================================================ */
 
 export async function POST(req: NextRequest) {
+  let locale: Locale = DEFAULT_LOCALE;
   try {
     let rawBody: unknown;
     try {
       rawBody = await req.json();
     } catch {
       return NextResponse.json(
-        { error: "So‘rov formati noto‘g‘ri." },
+        { error: translations[locale].chatErrors.invalidJson },
         { status: 400 },
       );
+    }
+
+    // Boshqa maydonlar yaroqsiz bo'lsa ham, xato so'rov tilida qaytariladi.
+    if (rawBody && typeof rawBody === "object" && "locale" in rawBody) {
+      if (rawBody.locale === "uz" || rawBody.locale === "en") {
+        locale = rawBody.locale;
+      }
     }
 
     const parsed = ChatRequestSchema.safeParse(rawBody);
     if (!parsed.success) {
       return NextResponse.json(
-        { error: "So‘rov ma’lumotlari noto‘g‘ri yoki juda uzun." },
+        { error: translations[locale].chatErrors.invalidRequest },
         { status: 400 },
       );
     }
@@ -203,7 +211,6 @@ export async function POST(req: NextRequest) {
     const {
       messages,
       userMessage,
-      locale = "uz",
       stream = false,
     } = parsed.data;
     const query = (
@@ -214,7 +221,7 @@ export async function POST(req: NextRequest) {
 
     if (!query) {
       return NextResponse.json(
-        { error: "Xabar matni bo‘sh bo‘lishi mumkin emas." },
+        { error: translations[locale].chatErrors.emptyMessage },
         { status: 400 },
       );
     }
@@ -232,10 +239,7 @@ export async function POST(req: NextRequest) {
     if (limited) {
       return NextResponse.json(
         {
-          error:
-            locale === "en"
-              ? "Too many requests. Please try again in a minute."
-              : "Juda ko‘p so‘rov yuborildi. Bir daqiqadan so‘ng qayta urinib ko‘ring.",
+          error: translations[locale].chatErrors.rateLimited,
         },
         { status: 429 },
       );
@@ -353,10 +357,7 @@ export async function POST(req: NextRequest) {
             console.error("Streaming error:", err);
             send({
               type: "error",
-              error:
-                locale === "en"
-                  ? "An error occurred while processing."
-                  : "Hisob-kitob jarayonida xatolik yuz berdi.",
+              error: translations[locale].chatErrors.processingFailed,
             });
           } finally {
             try {
@@ -424,8 +425,7 @@ export async function POST(req: NextRequest) {
     console.error("Chat API error:", error);
     return NextResponse.json(
       {
-        error:
-          "Hozir AI xizmati vaqtincha ishlamayapti. Demo rejimida davom etishingiz mumkin.",
+        error: translations[locale].chatErrors.serviceUnavailable,
       },
       { status: 500 },
     );

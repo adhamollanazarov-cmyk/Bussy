@@ -1,4 +1,5 @@
 import { calculateLoan } from "@/lib/engine/loan";
+import type { LoanCalculationResult } from "@/lib/engine/types";
 import { calculateProfit } from "@/lib/engine/profit";
 import { calculateBreakEven } from "@/lib/engine/breakeven";
 import { calculateCashflow } from "@/lib/engine/cashflow";
@@ -12,6 +13,15 @@ import { DEFAULT_TURNOVER_TAX_PERCENT } from "@/lib/engine/assumptions";
 import type { Locale } from "@/lib/i18n/translations";
 
 export type ToolArgs = Record<string, unknown>;
+
+/** Modelga faqat kredit yakunlari yuboriladi; UI uchun to'liq natija o'zgarmaydi. */
+export function getToolResultForModel(name: string, result: unknown): unknown {
+  if (name === "calculate_loan") {
+    const { monthlyPayment, totalPayment, totalInterest } = result as LoanCalculationResult;
+    return { monthlyPayment, totalPayment, totalInterest };
+  }
+  return result;
+}
 
 function asNumber(value: unknown, fallback = 0): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;

@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { runTool, TOOL_NAMES } from "./run-tool";
+import { runTool, getToolResultForModel, TOOL_NAMES } from "./run-tool";
+import { calculateLoan } from "@/lib/engine/loan";
 import { BUSSY_TOOLS } from "./tools";
 
 /* ============================================================
@@ -10,6 +11,24 @@ import { BUSSY_TOOLS } from "./tools";
    ============================================================ */
 
 describe("runTool", () => {
+  it.each([24, 60])("%i oylik kredit: modelga faqat yakunlar, UI ga to'liq jadval", (months) => {
+    const expected = calculateLoan({ amount: 50_000_000, annualRate: 24, months });
+    const result = runTool("calculate_loan", { amount: 50_000_000, annual_rate: 24, months });
+
+    expect(getToolResultForModel("calculate_loan", result)).toEqual({
+      monthlyPayment: expected.monthlyPayment,
+      totalPayment: expected.totalPayment,
+      totalInterest: expected.totalInterest,
+    });
+    expect(result).toEqual(expected);
+    expect(expected.schedule).toHaveLength(months);
+  });
+
+  it.each(TOOL_NAMES.filter((name) => name !== "calculate_loan"))("%s natijasi model uchun o'zgarmaydi", (name) => {
+    const result = runTool(name, {});
+    expect(getToolResultForModel(name, result)).toBe(result);
+  });
+
   it("har bir e'lon qilingan vosita bajariladi", () => {
     // BUSSY_TOOLS dagi har bir nom uchun dispetcherda tarmoq bo'lishi shart,
     // aks holda model chaqiradi-yu, hech narsa qaytmaydi.

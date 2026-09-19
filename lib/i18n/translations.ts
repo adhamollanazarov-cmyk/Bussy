@@ -11,6 +11,15 @@ export const DEFAULT_LOCALE: Locale = "uz";
  */
 export const translations = {
   uz: {
+    chatErrors: {
+      invalidJson: "So‘rov formati noto‘g‘ri.",
+      invalidRequest: "So‘rov ma’lumotlari noto‘g‘ri yoki juda uzun.",
+      emptyMessage: "Xabar matni bo‘sh bo‘lishi mumkin emas.",
+      rateLimited: "Juda ko‘p so‘rov yuborildi. Bir daqiqadan so‘ng qayta urinib ko‘ring.",
+      processingFailed: "Hisob-kitob jarayonida xatolik yuz berdi.",
+      serviceUnavailable: "Hozir AI xizmati vaqtincha ishlamayapti. Demo rejimida davom etishingiz mumkin.",
+      unknownTool: "Noma'lum hisoblash vositasi: {tool}",
+    },
     common: {
       appName: "Bussy",
       loading: "Yuklanmoqda…",
@@ -23,6 +32,31 @@ export const translations = {
       retry: "Qayta urinish",
       months: "oy",
       years: "yil",
+    },
+    calculationAssumptions: {
+      heading: "Hisob-kitob taxminlari",
+      daysPerMonth: "Kunlik ko'rsatkichlar oyiga {days} kun asosida hisoblanadi.",
+      costSplit: "Oylik xarajatlarning {fixed} qismi o'zgarmas, {variable} qismi o'zgaruvchan deb olinadi.",
+      enteredCosts: "O'zgarmas xarajatlar: ijara, maosh va boshqa xarajatlar. O'zgaruvchan xarajatlar: xom-ashyo va marketing. Kiritilgan summalar ishlatiladi.",
+      unitEconomics: "{type} uchun namunaviy o'rtacha chek — {price}, birlik tannarxi — {cost}. Bular rasmiy statistika emas.",
+      editableUnitEconomics: "Boshlang'ich chek va birlik tannarxi {type} uchun namunaviy qiymatlardan olinadi, ularni o'zgartirish mumkin. Hisobdagi joriy chek — {price}, birlik tannarxi — {cost}. Bular rasmiy statistika emas.",
+      simulatorAdjustments: "Namunaviy chek va tannarx boshlang'ich ssenariy uchun olinadi; simulyatsiyada ular narx va xarajat slayderlariga mos o'zgaradi.",
+    },
+    breakEven: {
+      // Narx tannarxdan past — zararsizlikka erishib bo'lmaydi
+      unreachableShort: "Erishib bo'lmaydi",
+      unreachableTitle: "Bu narxda zararsizlikka erishib bo'lmaydi",
+      unreachableBody:
+        "Bitta mahsulot narxi ({price}) uning o'zgaruvchan tannarxidan ({cost}) past yoki unga teng. Har bir sotuvdan zarar ko'riladi, shuning uchun sotuv hajmini oshirish yordam bermaydi — qancha ko'p sotsangiz, zarar shuncha ortadi.",
+      unreachableFix:
+        "Yechim: sotish narxini tannarxdan yuqori qilib ko'taring yoki bitta mahsulotning tannarxini pasaytiring.",
+      // O'zgarmas xarajat yo'q — zararsizlik darhol bosib o'tiladi
+      noFixedCostShort: "Darhol",
+      noFixedCostTitle: "Zararsizlik birinchi sotuvdayoq bosib o'tiladi",
+      noFixedCostBody:
+        "O'zgarmas xarajat kiritilmagan (0 so'm), shuning uchun qoplash uchun minimal hajm talab qilinmaydi. Har bir sotilgan mahsulot to'g'ridan-to'g'ri foyda keltiradi.",
+      noFixedCostFix:
+        "Ijara, maosh va kommunal xarajatlarni kiriting — shunda zararsizlik nuqtasi haqiqiy raqamni ko'rsatadi.",
     },
     languageToggle: {
       label: "Til",
@@ -235,6 +269,9 @@ export const translations = {
       effectiveRateLabel: "Effektiv yuklama: ~{percent}",
       profitAfterTaxLabel: "Soliqdan keyingi sof foyda",
       breakdownHeading: "Soliq moddalari tarkibi",
+      ratePendingVerification: "Stavka tekshirilmoqda",
+      rateEffectiveFrom: "Stavka sanasi: {date}",
+      rateLegalBasis: "Huquqiy asos",
       totalTaxLabel: "Jami soliq yuki",
       assumptionsHeading: "Hisobda qabul qilingan taxminlar:",
       comparisonHeading: "3 ta soliq rejimini qiyosiy tahlili (Buxgalter ko'rinishi)",
@@ -656,6 +693,15 @@ export const translations = {
     },
   },
   en: {
+    chatErrors: {
+      invalidJson: "Invalid request format.",
+      invalidRequest: "The request data is invalid or too long.",
+      emptyMessage: "Message text must not be empty.",
+      rateLimited: "Too many requests. Please try again in a minute.",
+      processingFailed: "An error occurred while processing.",
+      serviceUnavailable: "The AI service is temporarily unavailable. You can continue in demo mode.",
+      unknownTool: "Unknown calculation tool: {tool}",
+    },
     common: {
       appName: "Bussy",
       loading: "Loading…",
@@ -668,6 +714,31 @@ export const translations = {
       retry: "Try again",
       months: "mo",
       years: "yr",
+    },
+    calculationAssumptions: {
+      heading: "Calculation assumptions",
+      daysPerMonth: "Daily figures are calculated using {days} days per month.",
+      costSplit: "Monthly expenses are assumed to be {fixed} fixed and {variable} variable.",
+      enteredCosts: "Fixed costs include rent, salaries and other costs. Variable costs include raw materials and marketing. The entered amounts are used.",
+      unitEconomics: "Illustrative average ticket for {type}: {price}; cost per unit: {cost}. These are not official statistics.",
+      editableUnitEconomics: "The initial ticket and unit cost use illustrative values for {type} and can be edited. Current ticket used: {price}; cost per unit: {cost}. These are not official statistics.",
+      simulatorAdjustments: "The illustrative ticket and unit cost apply to the baseline; the simulation adjusts them using the price and cost sliders.",
+    },
+    breakEven: {
+      // Price at or below unit cost — break-even can never be reached
+      unreachableShort: "Unreachable",
+      unreachableTitle: "Break-even is unreachable at this price",
+      unreachableBody:
+        "The selling price ({price}) is at or below the variable cost per unit ({cost}). Every sale loses money, so selling more does not help — the more you sell, the larger the loss.",
+      unreachableFix:
+        "Fix: raise the selling price above the unit cost, or reduce the variable cost per unit.",
+      // No fixed costs — break-even is cleared immediately
+      noFixedCostShort: "Immediate",
+      noFixedCostTitle: "Break-even is cleared on the first sale",
+      noFixedCostBody:
+        "No fixed costs were entered (0), so there is no minimum volume to cover. Every unit sold turns directly into profit.",
+      noFixedCostFix:
+        "Enter rent, salaries and utilities to get a meaningful break-even point.",
     },
     languageToggle: {
       label: "Language",
@@ -879,6 +950,9 @@ export const translations = {
       effectiveRateLabel: "Effective burden: ~{percent}",
       profitAfterTaxLabel: "Net profit after tax",
       breakdownHeading: "Tax line items",
+      ratePendingVerification: "Rate pending verification",
+      rateEffectiveFrom: "Rate effective from: {date}",
+      rateLegalBasis: "Legal basis",
       totalTaxLabel: "Total tax burden",
       assumptionsHeading: "Assumptions used in this calculation:",
       comparisonHeading: "3 Tax Regimes Comparative Audit (Accountant View)",

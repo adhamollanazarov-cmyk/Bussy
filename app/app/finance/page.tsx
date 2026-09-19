@@ -14,12 +14,18 @@ import { calculateProfit } from "@/lib/engine/profit";
 import { calculateCashflow } from "@/lib/engine/cashflow";
 import { calculateBreakEven } from "@/lib/engine/breakeven";
 import { calculateLoan } from "@/lib/engine/loan";
-import { DEFAULT_TURNOVER_TAX_PERCENT, resolveUnitEconomics } from "@/lib/engine/assumptions";
+import { DAYS_PER_MONTH, DEFAULT_TURNOVER_TAX_PERCENT, resolveUnitEconomics } from "@/lib/engine/assumptions";
 import { FinanceChart } from "@/components/charts/finance-chart";
 import { BreakEvenChart } from "@/components/charts/breakeven-chart";
 import { useBusiness, useSeededState } from "@/lib/store/business-store";
 import { useLanguage } from "@/lib/i18n/language-store";
-import { formatMoney, formatPercent, parseNumberInput, safeRatioPercent } from "@/lib/utils";
+import {
+  formatMoney,
+  formatPercent,
+  parseNumberInput,
+  safeRatioPercent,
+  classifyBreakEven,
+} from "@/lib/utils";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -89,6 +95,19 @@ export default function FinanceAnalysisPage() {
       variableCostPerUnit: unitCost,
     });
   }, [fixedCost, sellingPrice, unitCost]);
+
+  // "0 ta" ikki xil holatda chiqardi: narx tannarxdan past (erishib bo'lmaydi)
+  // va o'zgarmas xarajat nol (darhol bosib o'tiladi). Ular aralashtirilmaydi.
+  const breakEvenStatus = classifyBreakEven(breakEvenResult);
+
+  const assumptions = [
+    t.calculationAssumptions.enteredCosts,
+    t.calculationAssumptions.daysPerMonth.replace("{days}", String(DAYS_PER_MONTH)),
+    t.calculationAssumptions.editableUnitEconomics
+      .replace("{type}", unitEconomics.displayName)
+      .replace("{price}", formatMoney(breakEvenResult.sellingPrice))
+      .replace("{cost}", formatMoney(breakEvenResult.variableCostPerUnit)),
+  ];
 
   // AI Insights hisoblash (Section 20)
   const insights = useMemo(() => {
@@ -237,17 +256,43 @@ export default function FinanceAnalysisPage() {
 
           <div className="bg-white p-3 rounded-xl border border-slate-200/80">
             <span className="text-[11px] text-slate-400 block mb-1">{t.finance.insightBreakEvenLabel}</span>
-            <p className="font-semibold text-slate-900">
-              {t.finance.insightBreakEvenBody.replace(
-                "{units}",
-                `${breakEvenResult.breakEvenUnits.toLocaleString(locale === "en" ? "en-US" : "ru-RU")} ${unitEconomics.unitLabel}${locale === "en" ? "s" : ""}`
-              )}
-            </p>
-            <span className="text-[10px] text-slate-500 block mt-1">
-              {t.finance.insightBreakEvenSub
-                .replace("{daily}", String(breakEvenResult.dailyUnits))
-                .replace("{price}", formatMoney(unitEconomics.sellingPrice))}
-            </span>
+            {breakEvenStatus === "unreachable" ? (
+              <>
+                <p className="font-semibold text-rose-700">{t.breakEven.unreachableTitle}</p>
+                <span className="text-[10px] text-slate-600 block mt-1 leading-relaxed">
+                  {t.breakEven.unreachableBody
+                    .replace("{price}", formatMoney(breakEvenResult.sellingPrice))
+                    .replace("{cost}", formatMoney(breakEvenResult.variableCostPerUnit))}
+                </span>
+                <span className="text-[10px] text-rose-700 font-medium block mt-1">
+                  {t.breakEven.unreachableFix}
+                </span>
+              </>
+            ) : breakEvenStatus === "noFixedCost" ? (
+              <>
+                <p className="font-semibold text-emerald-800">{t.breakEven.noFixedCostTitle}</p>
+                <span className="text-[10px] text-slate-600 block mt-1 leading-relaxed">
+                  {t.breakEven.noFixedCostBody}
+                </span>
+                <span className="text-[10px] text-slate-500 block mt-1">
+                  {t.breakEven.noFixedCostFix}
+                </span>
+              </>
+            ) : (
+              <>
+                <p className="font-semibold text-slate-900">
+                  {t.finance.insightBreakEvenBody.replace(
+                    "{units}",
+                    `${breakEvenResult.breakEvenUnits.toLocaleString(locale === "en" ? "en-US" : "ru-RU")} ${unitEconomics.unitLabel}${locale === "en" ? "s" : ""}`
+                  )}
+                </p>
+                <span className="text-[10px] text-slate-500 block mt-1">
+                  {t.finance.insightBreakEvenSub
+                    .replace("{daily}", String(breakEvenResult.dailyUnits))
+                    .replace("{price}", formatMoney(unitEconomics.sellingPrice))}
+                </span>
+              </>
+            )}
           </div>
         </div>
       </div>
@@ -371,25 +416,52 @@ export default function FinanceAnalysisPage() {
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-bold flex items-center justify-between">
                 <span>{t.finance.chartBreakEvenHeading}</span>
-                <Badge variant="secondary">
-                  {t.finance.chartBreakEvenBadge.replace(
-                    "{units}",
-                    `${breakEvenResult.breakEvenUnits} ${unitEconomics.unitLabel}${locale === "en" ? "s" : ""}`
-                  )}
+                <Badge variant={breakEvenStatus === "unreachable" ? "danger" : "secondary"}>
+                  {breakEvenStatus === "unreachable"
+                    ? t.breakEven.unreachableShort
+                    : breakEvenStatus === "noFixedCost"
+                      ? t.breakEven.noFixedCostShort
+                      : t.finance.chartBreakEvenBadge.replace(
+                          "{units}",
+                          `${breakEvenResult.breakEvenUnits} ${unitEconomics.unitLabel}${locale === "en" ? "s" : ""}`
+                        )}
                 </Badge>
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <BreakEvenChart
-                fixedCost={fixedCost}
-                sellingPrice={breakEvenResult.sellingPrice}
-                variableCostPerUnit={breakEvenResult.variableCostPerUnit}
-                breakEvenUnits={breakEvenResult.breakEvenUnits}
-                breakEvenRevenue={breakEvenResult.breakEvenRevenue}
-              />
+              {breakEvenStatus === "unreachable" ? (
+                // Diagramma zararsizlik nuqtasini 0 da chizardi — bu matndagi
+                // "0 ta" bilan bir xil xato, faqat grafik ko'rinishda.
+                <div className="rounded-xl border border-rose-200 bg-rose-50/60 p-4 text-xs text-rose-900 leading-relaxed">
+                  <p className="font-bold mb-1">{t.breakEven.unreachableTitle}</p>
+                  <p className="text-slate-700">
+                    {t.breakEven.unreachableBody
+                      .replace("{price}", formatMoney(breakEvenResult.sellingPrice))
+                      .replace("{cost}", formatMoney(breakEvenResult.variableCostPerUnit))}
+                  </p>
+                  <p className="mt-2 font-medium">{t.breakEven.unreachableFix}</p>
+                </div>
+              ) : (
+                <BreakEvenChart
+                  fixedCost={fixedCost}
+                  sellingPrice={breakEvenResult.sellingPrice}
+                  variableCostPerUnit={breakEvenResult.variableCostPerUnit}
+                  breakEvenUnits={breakEvenResult.breakEvenUnits}
+                  breakEvenRevenue={breakEvenResult.breakEvenRevenue}
+                />
+              )}
             </CardContent>
           </Card>
         </div>
+      </div>
+      <div className="text-[11px] text-slate-500 space-y-1">
+        <h3 className="text-sm font-bold text-slate-900">{t.calculationAssumptions.heading}</h3>
+        {assumptions.map((asm, i) => (
+          <p key={i} className="flex items-center gap-1.5">
+            <span className="inline-block w-1.5 h-1.5 rounded-full bg-slate-400 shrink-0"></span>
+            <span>{asm}</span>
+          </p>
+        ))}
       </div>
     </div>
   );

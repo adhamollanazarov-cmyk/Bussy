@@ -3,6 +3,7 @@
 import React, { useMemo } from "react";
 import { FileText, Printer, Sparkles, MapPin } from "lucide-react";
 import { generateStructuredBusinessPlan } from "@/lib/engine/analyzer";
+import { COST_SPLIT, DAYS_PER_MONTH, resolveUnitEconomics } from "@/lib/engine/assumptions";
 import { BusinessPlanData } from "@/lib/engine/types";
 import { useBusiness, useSeededState } from "@/lib/store/business-store";
 import { useLanguage } from "@/lib/i18n/language-store";
@@ -66,6 +67,19 @@ export default function BusinessPlanPage() {
   );
 
   const handleSave = () => saveBusinessPlan(plan);
+
+  const unitEconomics = resolveUnitEconomics(plan.businessType, locale);
+  const percentFormatter = new Intl.NumberFormat(locale, { style: "percent" });
+  const assumptions = [
+    t.calculationAssumptions.costSplit
+      .replace("{fixed}", percentFormatter.format(COST_SPLIT.fixed))
+      .replace("{variable}", percentFormatter.format(COST_SPLIT.variable)),
+    t.calculationAssumptions.daysPerMonth.replace("{days}", String(DAYS_PER_MONTH)),
+    t.calculationAssumptions.unitEconomics
+      .replace("{type}", unitEconomics.displayName)
+      .replace("{price}", formatMoney(unitEconomics.sellingPrice))
+      .replace("{cost}", formatMoney(unitEconomics.variableCostPerUnit)),
+  ];
 
   // Butun reja solishtiriladi: ilgari faqat `businessName` tekshirilar va
   // boshqa maydonni tahrirlaganda "Saqlandi ✓" noto'g'ri qolib ketardi.
@@ -344,6 +358,16 @@ export default function BusinessPlanPage() {
                 </h3>
                 <p className="text-slate-700 text-xs sm:text-sm pl-7">{plan.sections?.fundingStrategy}</p>
               </section>
+            </div>
+
+            <div className="text-[11px] text-slate-500 space-y-1">
+              <h3 className="text-sm font-bold text-slate-900">{t.calculationAssumptions.heading}</h3>
+              {assumptions.map((asm, i) => (
+                <p key={i} className="flex items-center gap-1.5">
+                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-slate-400 shrink-0"></span>
+                  <span>{asm}</span>
+                </p>
+              ))}
             </div>
 
             {/* Document Signature Strip */}

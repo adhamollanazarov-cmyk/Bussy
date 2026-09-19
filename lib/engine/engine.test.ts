@@ -5,6 +5,7 @@ import { calculateBreakEven } from "./breakeven";
 import { calculateCashflow } from "./cashflow";
 import { calculateTax, UZ_TAX_REGIMES, type TaxRegimeType } from "./tax";
 import { analyzeDebtBurden } from "./analyzer";
+import { classifyBreakEven } from "@/lib/utils";
 
 /* ============================================================
    KREDIT (annuitet)
@@ -143,6 +144,85 @@ describe("calculateBreakEven", () => {
 });
 
 /* ============================================================
+   ZARARSIZLIKNI KO'RSATISH UCHUN TASNIFLASH (T3)
+   ------------------------------------------------------------
+   Dvigatel ikkita butunlay boshqa holatda ham `breakEvenUnits: 0`
+   qaytaradi va sahifalar ikkalasini "0 ta" deb chizardi.
+   ============================================================ */
+
+describe("classifyBreakEven", () => {
+  it("narx tannarxdan past bo'lsa — erishib bo'lmaydi", () => {
+    const res = calculateBreakEven({
+      fixedCost: 10_000_000,
+      sellingPrice: 10_000,
+      variableCostPerUnit: 12_000,
+    });
+    expect(classifyBreakEven(res)).toBe("unreachable");
+  });
+
+  it("narx tannarxga TENG bo'lsa ham — erishib bo'lmaydi", () => {
+    const res = calculateBreakEven({
+      fixedCost: 10_000_000,
+      sellingPrice: 12_000,
+      variableCostPerUnit: 12_000,
+    });
+    expect(classifyBreakEven(res)).toBe("unreachable");
+  });
+
+  it("o'zgarmas xarajat nol bo'lsa — bu BOSHQA holat", () => {
+    const res = calculateBreakEven({
+      fixedCost: 0,
+      sellingPrice: 35_000,
+      variableCostPerUnit: 18_000,
+    });
+    expect(classifyBreakEven(res)).toBe("noFixedCost");
+  });
+
+  it("ikkalasi ham muammoli bo'lsa, narx muammosi ustun", () => {
+    const res = calculateBreakEven({
+      fixedCost: 0,
+      sellingPrice: 10_000,
+      variableCostPerUnit: 12_000,
+    });
+    expect(classifyBreakEven(res)).toBe("unreachable");
+  });
+
+  it("normal holatda raqam ko'rsatiladi", () => {
+    const res = calculateBreakEven({
+      fixedCost: 16_800_000,
+      sellingPrice: 35_000,
+      variableCostPerUnit: 18_000,
+    });
+    expect(classifyBreakEven(res)).toBe("ok");
+    expect(res.breakEvenUnits).toBeGreaterThan(0);
+  });
+
+  it("contributionMargin bo'yicha ajratib BO'LMAYDI — shuning uchun kirishlar bo'yicha ajratamiz", () => {
+    // Bu dvigatelning hozirgi xatti-harakatini qulflaydi: erta qaytishda
+    // `contributionMargin` HAR IKKALA holatda ham 0 ga tenglashtiriladi,
+    // shuning uchun u tasniflash uchun yaroqsiz.
+    const priceTooLow = calculateBreakEven({
+      fixedCost: 10_000_000,
+      sellingPrice: 10_000,
+      variableCostPerUnit: 12_000,
+    });
+    const noFixedCost = calculateBreakEven({
+      fixedCost: 0,
+      sellingPrice: 35_000,
+      variableCostPerUnit: 18_000,
+    });
+
+    expect(priceTooLow.contributionMargin).toBe(0);
+    expect(noFixedCost.contributionMargin).toBe(0);
+    expect(priceTooLow.breakEvenUnits).toBe(0);
+    expect(noFixedCost.breakEvenUnits).toBe(0);
+
+    // Bir xil ko'rinsa ham, tasnif har xil
+    expect(classifyBreakEven(priceTooLow)).not.toBe(classifyBreakEven(noFixedCost));
+  });
+});
+
+/* ============================================================
    PUL OQIMI
    ============================================================ */
 
@@ -166,6 +246,43 @@ describe("calculateCashflow", () => {
       tax: 1_800_000,
     });
     expect(res.status).toBe("healthy");
+  });
+
+  /* ---------- Nol tushum (T4) ---------- */
+
+  it("revenue = 0 va expenses = 0 bo'lsa healthy BO'LMAYDI", () => {
+    const res = calculateCashflow({ revenue: 0, expenses: 0 });
+
+    // Ilgari: netCashflow = 0 → ikkala shart ham o'tmas → "healthy"
+    expect(res.netCashflow).toBe(0);
+    expect(res.status).not.toBe("healthy");
+    expect(res.status).toBe("warning");
+  });
+
+  it("nol tushum uchun matn aynan shu holatni tushuntiradi", () => {
+    const uz = calculateCashflow({ revenue: 0, expenses: 0 });
+    const en = calculateCashflow({ revenue: 0, expenses: 0, locale: "en" });
+
+    // "Past erkin pul oqimi" emas — tushum yo'qligi haqidagi matn
+    expect(uz.statusText).toContain("Tushum nol");
+    expect(en.statusText).toContain("Revenue is zero");
+
+    // Ikkala lokal ham o'z tilida javob beradi
+    expect(uz.statusText).not.toBe(en.statusText);
+  });
+
+  it("tushum nol, xarajat bor bo'lsa — critical", () => {
+    const res = calculateCashflow({ revenue: 0, expenses: 5_000_000 });
+    expect(res.netCashflow).toBeLessThan(0);
+    expect(res.status).toBe("critical");
+    // Bu yerda manfiy oqim matni aniqroq, "tushum nol" matni emas
+    expect(res.statusText).not.toContain("Tushum nol");
+  });
+
+  it("tushum bor, lekin oqim nol bo'lsa — warning (nol tushum matni emas)", () => {
+    const res = calculateCashflow({ revenue: 10_000_000, expenses: 10_000_000 });
+    expect(res.status).toBe("warning");
+    expect(res.statusText).not.toContain("Tushum nol");
   });
 });
 
@@ -196,6 +313,87 @@ describe("calculateTax", () => {
       expenses: 28_000_000,
     });
     expect(res.taxAmount).toBe(500_000 + 375_000);
+  });
+
+  /* ---------- Imtiyozli aylanma stavkasi (T7) ---------- */
+
+  describe("aylanma soliq — imtiyozli stavka", () => {
+    const revenue = 100_000_000;
+    const expenses = 60_000_000;
+
+    it("standart stavka (customRate berilmagan) — 4%", () => {
+      const res = calculateTax({ regime: "turnover", revenue, expenses });
+      expect(res.taxAmount).toBe(4_000_000);
+      expect(res.effectiveTaxRate).toBe(4);
+    });
+
+    it("imtiyozli 1% stavkasi customRate orqali qo'llanadi", () => {
+      const res = calculateTax({
+        regime: "turnover",
+        revenue,
+        expenses,
+        customRate: 1,
+      });
+
+      expect(res.taxAmount).toBe(1_000_000);
+      expect(res.taxBase).toBe(revenue);
+      expect(res.effectiveTaxRate).toBe(1);
+      // Xarajatlar aylanma solig'ida hisobga olinmaydi, lekin sof foydadan ayriladi
+      expect(res.profitAfterTax).toBe(revenue - expenses - 1_000_000);
+    });
+
+    it("1% stavkasi jadval satrida ham ko'rinadi (ikkala tilda)", () => {
+      const uz = calculateTax({
+        regime: "turnover",
+        revenue,
+        expenses,
+        customRate: 1,
+      });
+      const en = calculateTax({
+        regime: "turnover",
+        revenue,
+        expenses,
+        customRate: 1,
+        locale: "en",
+      });
+
+      expect(uz.breakdown[0].label).toContain("1%");
+      expect(en.breakdown[0].label).toContain("1%");
+      expect(uz.breakdown[0].amount).toBe(1_000_000);
+      expect(en.breakdown[0].amount).toBe(1_000_000);
+    });
+
+    it("1% 4% dan aynan 4 barobar kam soliq beradi", () => {
+      const standard = calculateTax({ regime: "turnover", revenue, expenses });
+      const preferential = calculateTax({
+        regime: "turnover",
+        revenue,
+        expenses,
+        customRate: 1,
+      });
+      expect(standard.taxAmount).toBe(preferential.taxAmount * 4);
+    });
+
+    it("2% imtiyozli stavkasi ham ishlaydi", () => {
+      const res = calculateTax({
+        regime: "turnover",
+        revenue,
+        expenses,
+        customRate: 2,
+      });
+      expect(res.taxAmount).toBe(2_000_000);
+    });
+
+    it("breakdown yig'indisi imtiyozli stavkada ham taxAmount ga teng", () => {
+      const res = calculateTax({
+        regime: "turnover",
+        revenue,
+        expenses,
+        customRate: 1,
+      });
+      const sum = res.breakdown.reduce((acc, i) => acc + i.amount, 0);
+      expect(sum).toBe(res.taxAmount);
+    });
   });
 
   it("aylanma soliq tushumdan olinadi", () => {
