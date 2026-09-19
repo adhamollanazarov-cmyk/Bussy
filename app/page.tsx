@@ -2,6 +2,7 @@
 
 import React from "react";
 import Link from "next/link";
+import Image from "next/image";
 import {
   Sparkles,
   ArrowRight,
@@ -63,8 +64,8 @@ export default function LandingPage() {
   const demoUnitLabel = resolveUnitEconomics("fast food", locale).unitLabel;
   const FEATURES = t.landing.features.map((feat, idx) => ({
     ...feat,
-    icon: FEATURE_ICONS[idx],
-    color: FEATURE_COLORS[idx],
+    icon: FEATURE_ICONS[idx] || MessageSquare,
+    color: FEATURE_COLORS[idx] || "bg-emerald-50 text-emerald-700",
   }));
 
   return (
@@ -72,9 +73,16 @@ export default function LandingPage() {
       {/* Top Navbar */}
       <header className="sticky top-0 z-40 border-b border-slate-200/80 bg-white/80 backdrop-blur-md">
         <div className="max-w-7xl mx-auto flex h-16 items-center justify-between px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center gap-2">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-900 text-emerald-400 shadow-sm">
-              <Sparkles className="h-5 w-5" />
+          <div className="flex items-center gap-2.5">
+            <div className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-xl overflow-hidden bg-white border border-slate-200/80 shadow-xs">
+              <Image
+                src="/logo.png"
+                alt="Bussy"
+                width={36}
+                height={36}
+                className="h-full w-full object-contain p-0.5"
+                priority
+              />
             </div>
             <span className="text-xl font-bold tracking-tight text-slate-950 font-mono">
               bussy
@@ -283,6 +291,15 @@ export default function LandingPage() {
       <footer className="py-8 bg-white border-t border-slate-200 text-xs text-slate-500">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-2">
+            <div className="relative h-5 w-5 shrink-0 overflow-hidden rounded-md">
+              <Image
+                src="/logo.png"
+                alt="Bussy"
+                width={20}
+                height={20}
+                className="h-full w-full object-contain"
+              />
+            </div>
             <span className="font-bold text-slate-900 font-mono">bussy</span>
             <span>— {t.landing.footerTagline}</span>
           </div>

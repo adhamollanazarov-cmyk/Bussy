@@ -1,6 +1,8 @@
 "use client";
 
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
+import Image from "next/image";
 import {
   Send,
   Sparkles,
@@ -14,11 +16,20 @@ import {
   ArrowRight,
   Cpu,
 } from "lucide-react";
-import { ChatMessage, MessageItem } from "@/components/chat/chat-message";
+import { ChatMessage, MessageItem, AgentStep } from "@/components/chat/chat-message";
 import { Button } from "@/components/ui/button";
 import { useLanguage } from "@/lib/i18n/language-store";
 
-const QUICK_PROMPT_ICONS = [Zap, CreditCard, BarChart3, FileText, Receipt, TrendingUp, Lightbulb];
+const QUICK_PROMPT_ICONS = [
+  Zap,
+  Sparkles,
+  CreditCard,
+  BarChart3,
+  FileText,
+  Receipt,
+  TrendingUp,
+  Lightbulb,
+];
 
 /**
  * Serverga yuboriladigan suhbat tarixi chegarasi.
@@ -29,11 +40,11 @@ const QUICK_PROMPT_ICONS = [Zap, CreditCard, BarChart3, FileText, Receipt, Trend
  */
 const MAX_HISTORY_MESSAGES = 20;
 
-export default function ChatPage() {
+function ChatContent() {
   const { t, locale } = useLanguage();
   const INITIAL_QUICK_PROMPTS = t.chat.quickPrompts.map((item, idx) => ({
     ...item,
-    icon: QUICK_PROMPT_ICONS[idx],
+    icon: QUICK_PROMPT_ICONS[idx] || Sparkles,
     highlight: idx === 0,
   }));
 
@@ -41,6 +52,7 @@ export default function ChatPage() {
   const [inputValue, setInputValue] = useState("");
   const [loading, setLoading] = useState(false);
   const [loadingText, setLoadingText] = useState<string>(t.chat.loadingGeneral);
+  const [activeSteps, setActiveSteps] = useState<AgentStep[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -65,6 +77,7 @@ export default function ChatPage() {
     setMessages((prev) => [...prev, userMessage]);
     setInputValue("");
     setLoading(true);
+    setActiveSteps([]);
 
     // UX dinamik loading matnlari
     const lower = query.toLowerCase();
@@ -86,6 +99,7 @@ export default function ChatPage() {
         body: JSON.stringify({
           userMessage: query,
           locale,
+          stream: true,
           messages: messages
             .concat(userMessage)
             .slice(-MAX_HISTORY_MESSAGES)
@@ -96,32 +110,94 @@ export default function ChatPage() {
         }),
       });
 
-      const data = await res.json();
-
       if (!res.ok) {
-        // Server aniq sababni qaytaradi (masalan, tezlik chekloviga yetildi)
+        let errText = t.chat.genericError;
+        try {
+          const errData = await res.json();
+          if (typeof errData?.error === "string") errText = errData.error;
+        } catch {
+          // ignore
+        }
         setMessages((prev) => [
           ...prev,
           {
             id: (Date.now() + 1).toString(),
             role: "assistant",
-            content: typeof data?.error === "string" ? data.error : t.chat.genericError,
+            content: errText,
           },
         ]);
         return;
       }
 
-      const assistantMessage: MessageItem = {
-        id: (Date.now() + 1).toString(),
-        role: "assistant",
-        content: data.content || t.chat.noResponse,
-        toolCalled: data.toolCalled,
-        toolResult: data.toolResult,
-        steps: data.steps,
-        quickActions: data.quickActions,
-      };
+      const contentType = res.headers.get("content-type") || "";
+      if (contentType.includes("text/event-stream") && res.body) {
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
 
-      setMessages((prev) => [...prev, assistantMessage]);
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const parts = buffer.split("\n\n");
+          buffer = parts.pop() || "";
+
+          for (const block of parts) {
+            const trimmed = block.trim();
+            if (!trimmed.startsWith("data:")) continue;
+            const payloadStr = trimmed.replace(/^data:\s*/, "");
+            try {
+              const evt = JSON.parse(payloadStr);
+              if (evt.type === "status") {
+                setLoadingText(evt.message);
+              } else if (evt.type === "step" && evt.step) {
+                setActiveSteps((prev) => [...prev, evt.step]);
+                const toolName = t.chatMessage.toolLabels[evt.step.tool] || evt.step.tool;
+                setLoadingText(
+                  `${toolName} ${locale === "en" ? "completed, continuing..." : "hisoblandi, davom etmoqda..."}`
+                );
+              } else if (evt.type === "done" && evt.message) {
+                const msg = evt.message;
+                const assistantMessage: MessageItem = {
+                  id: (Date.now() + 1).toString(),
+                  role: "assistant",
+                  content: msg.content || t.chat.noResponse,
+                  toolCalled: msg.toolCalled,
+                  toolResult: msg.toolResult,
+                  steps: msg.steps,
+                  quickActions: msg.quickActions,
+                };
+                setMessages((prev) => [...prev, assistantMessage]);
+                setActiveSteps([]);
+              } else if (evt.type === "error") {
+                setMessages((prev) => [
+                  ...prev,
+                  {
+                    id: (Date.now() + 1).toString(),
+                    role: "assistant",
+                    content: evt.error || t.chat.genericError,
+                  },
+                ]);
+                setActiveSteps([]);
+              }
+            } catch {
+              // ignore parse errors
+            }
+          }
+        }
+      } else {
+        const data = await res.json();
+        const assistantMessage: MessageItem = {
+          id: (Date.now() + 1).toString(),
+          role: "assistant",
+          content: data.content || t.chat.noResponse,
+          toolCalled: data.toolCalled,
+          toolResult: data.toolResult,
+          steps: data.steps,
+          quickActions: data.quickActions,
+        };
+        setMessages((prev) => [...prev, assistantMessage]);
+      }
     } catch (err) {
       console.error(err);
       setMessages((prev) => [
@@ -134,9 +210,57 @@ export default function ChatPage() {
       ]);
     } finally {
       setLoading(false);
+      setActiveSteps([]);
       setTimeout(() => inputRef.current?.focus(), 100);
     }
   };
+
+  const sendRef = useRef(handleSendMessage);
+  useEffect(() => {
+    sendRef.current = handleSendMessage;
+  });
+
+  // Demo yo'riqnomasidan yuborilgan custom hodisalarni tinglash
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const customEvent = e as CustomEvent<{ prompt?: string }>;
+      if (customEvent.detail?.prompt) {
+        sendRef.current(customEvent.detail.prompt);
+      }
+    };
+    window.addEventListener("bussy:send-chat-prompt", handler);
+    return () => window.removeEventListener("bussy:send-chat-prompt", handler);
+  }, []);
+
+  // URL dagi ?demo=scenario yoki ?demo=chain parametrlarini avtomatik ishga tushirish
+  const searchParams = useSearchParams();
+  const triggeredRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const demo = searchParams.get("demo");
+    const promptParam = searchParams.get("prompt");
+    const key = `${demo || ""}:${promptParam || ""}:${locale}`;
+    if (triggeredRef.current === key) return;
+
+    if (demo === "scenario") {
+      triggeredRef.current = key;
+      sendRef.current(
+        locale === "en"
+          ? "I want to start a fast food business in Urganch with 100M UZS. I can also get a 50M UZS loan. Build me a financial plan."
+          : "Urganchda 100 mln so‘m bilan fast food biznes boshlamoqchiman. Yana 50 mln so‘m kredit olishim mumkin. Menga moliyaviy reja tuzib ber."
+      );
+    } else if (demo === "chain") {
+      triggeredRef.current = key;
+      sendRef.current(
+        locale === "en"
+          ? "How many units do I need to sell per day to cover the loan?"
+          : "Kreditni qoplash uchun kuniga nechta sotishim kerak?"
+      );
+    } else if (promptParam) {
+      triggeredRef.current = key;
+      sendRef.current(promptParam);
+    }
+  }, [searchParams, locale]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -150,8 +274,14 @@ export default function ChatPage() {
       {/* Header */}
       <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4 bg-slate-50/50">
         <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-900 text-emerald-400 shadow-sm">
-            <Sparkles className="h-5 w-5" />
+          <div className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl overflow-hidden bg-white border border-slate-200/80 shadow-xs">
+            <Image
+              src="/logo.png"
+              alt="Bussy AI"
+              width={40}
+              height={40}
+              className="h-full w-full object-contain p-1"
+            />
           </div>
           <div>
             <div className="flex items-center gap-2">
@@ -180,15 +310,21 @@ export default function ChatPage() {
       <div className="flex-1 overflow-y-auto p-4 sm:p-6">
         {messages.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center text-center max-w-xl mx-auto py-6">
-            <div className="h-14 w-14 rounded-3xl bg-slate-900 text-emerald-400 flex items-center justify-center mb-4 shadow-lg shadow-slate-900/10">
-              <Sparkles className="h-7 w-7" />
+            <div className="relative h-16 w-16 rounded-3xl overflow-hidden bg-white border border-slate-200/80 flex items-center justify-center mb-4 shadow-lg shadow-slate-900/5">
+              <Image
+                src="/logo.png"
+                alt="Bussy AI"
+                width={64}
+                height={64}
+                className="h-full w-full object-contain p-2"
+              />
             </div>
             <h2 className="text-xl font-bold text-slate-900 mb-1">{t.chat.emptyTitle}</h2>
             <p className="text-xs sm:text-sm text-slate-500 mb-6 leading-relaxed">{t.chat.emptyDesc}</p>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 w-full">
               {INITIAL_QUICK_PROMPTS.map((item, idx) => {
-                const Icon = item.icon;
+                const Icon = item.icon || Sparkles;
                 return (
                   <button
                     key={idx}
@@ -227,13 +363,66 @@ export default function ChatPage() {
 
             {loading && (
               <div className="flex w-full gap-3 py-4 justify-start animate-fade-in">
-                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-slate-900 text-emerald-400">
-                  <Sparkles className="h-4 w-4 animate-spin" />
+                <div className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-xl overflow-hidden bg-white border border-slate-200 shadow-2xs">
+                  <Image
+                    src="/logo.png"
+                    alt="Bussy AI"
+                    width={32}
+                    height={32}
+                    className="h-full w-full object-contain p-0.5 animate-pulse"
+                  />
                 </div>
-                <div className="flex flex-col space-y-1">
-                  <div className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-600 shadow-2xs">
-                    <Cpu className="h-3.5 w-3.5 text-emerald-600 animate-pulse" />
-                    <span>{loadingText}</span>
+                <div className="flex max-w-2xl flex-col space-y-2">
+                  <div className="rounded-2xl border border-emerald-200/80 bg-emerald-50/40 p-4 shadow-xs space-y-3">
+                    {/* Header with live status and pulse */}
+                    <div className="flex items-center justify-between gap-2 border-b border-emerald-100/70 pb-2.5">
+                      <div className="flex items-center gap-2">
+                        <span className="relative flex h-2.5 w-2.5">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-600"></span>
+                        </span>
+                        <span className="text-xs font-bold text-slate-900">
+                          {activeSteps.length > 0
+                            ? t.chat.stepChainRunning.replace("{count}", String(activeSteps.length))
+                            : t.chat.agentThinking}
+                        </span>
+                      </div>
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-2.5 py-0.5 text-[10px] font-semibold text-emerald-800 border border-emerald-200/80 shadow-2xs">
+                        <Cpu className="h-3 w-3 text-emerald-600 animate-spin" />
+                        <span>AI Pipeline</span>
+                      </span>
+                    </div>
+
+                    {/* Step pills as they land */}
+                    {activeSteps.length > 0 && (
+                      <div className="space-y-1.5">
+                        {activeSteps.map((step, idx) => {
+                          const label = t.chatMessage.toolLabels[step.tool] || step.tool;
+                          return (
+                            <div
+                              key={idx}
+                              className="flex items-center justify-between rounded-xl bg-white px-3 py-2 text-xs text-slate-700 border border-slate-200/70 shadow-2xs animate-fade-in"
+                            >
+                              <div className="flex items-center gap-2">
+                                <span className="flex h-4 w-4 items-center justify-center rounded-full bg-emerald-500 text-[10px] font-bold text-white">
+                                  ✓
+                                </span>
+                                <span className="font-semibold text-slate-900">{label}</span>
+                              </div>
+                              <span className="text-[10px] font-mono text-emerald-700 font-semibold bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-100">
+                                {t.chat.stepDone}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {/* Current step running */}
+                    <div className="flex items-center gap-2 text-xs text-emerald-900 pt-0.5">
+                      <Sparkles className="h-3.5 w-3.5 text-emerald-600 animate-spin shrink-0" />
+                      <span className="italic font-medium">{loadingText}</span>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -280,5 +469,22 @@ export default function ChatPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function ChatPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex h-[calc(100vh-6.5rem)] items-center justify-center rounded-3xl border border-slate-200/80 bg-white shadow-xs">
+          <div className="flex items-center gap-2.5 text-xs font-semibold text-slate-600">
+            <div className="h-4 w-4 animate-spin rounded-full border-2 border-emerald-600 border-t-transparent" />
+            <span>Yuklanmoqda...</span>
+          </div>
+        </div>
+      }
+    >
+      <ChatContent />
+    </Suspense>
   );
 }

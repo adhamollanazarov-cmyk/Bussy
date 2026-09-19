@@ -171,6 +171,21 @@ describe("agent tsikli", () => {
     expect(body.source).toBe("local");
   });
 
+  it("kalitsiz (lokal rejimda) ham zanjirli savol 2 qadamli natija beradi", async () => {
+    delete process.env.OPENAI_API_KEY;
+
+    const res = await POST(
+      makeRequest({ userMessage: "Kreditni qoplash uchun kuniga nechta sotishim kerak?" })
+    );
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.source).toBe("local");
+    expect(body.steps).toHaveLength(2);
+    expect(body.steps[0].tool).toBe("calculate_loan");
+    expect(body.steps[1].tool).toBe("calculate_break_even");
+  });
+
   it("tizim ko'rsatmasi har doim serverda qo'shiladi", async () => {
     fetchMock
       .mockResolvedValueOnce(textResponse("javob"))

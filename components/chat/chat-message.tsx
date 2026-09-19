@@ -2,7 +2,8 @@
 
 import React from "react";
 import Link from "next/link";
-import { Sparkles, User, ArrowRight, Cpu } from "lucide-react";
+import Image from "next/image";
+import { User, ArrowRight, Cpu } from "lucide-react";
 import { CalculationCard } from "./calculation-card";
 import { cn } from "@/lib/utils";
 import { useLanguage } from "@/lib/i18n/language-store";
@@ -137,8 +138,14 @@ export function ChatMessage({ message, onSelectPrompt }: ChatMessageProps) {
       )}
     >
       {isAssistant && (
-        <div className="flex h-8 w-8 shrink-0 select-none items-center justify-center rounded-xl bg-slate-900 text-emerald-400 shadow-sm">
-          <Sparkles className="h-4 w-4" />
+        <div className="relative flex h-8 w-8 shrink-0 select-none items-center justify-center rounded-xl overflow-hidden bg-white border border-slate-200 shadow-2xs">
+          <Image
+            src="/logo.png"
+            alt="Bussy AI"
+            width={32}
+            height={32}
+            className="h-full w-full object-contain p-0.5"
+          />
         </div>
       )}
 

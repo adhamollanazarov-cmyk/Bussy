@@ -100,6 +100,44 @@ describe("detectIntent", () => {
   it("biznes-reja so'rovini taniydi", () => {
     expect(detectIntent("menga 11 bo‘limli biznes-reja tayyorlab ber")).toBe("BUSINESS_PLAN");
   });
+
+  it("kreditni qoplash bo'yicha zanjirli savolni taniydi (CHAINED_LOAN_BREAK_EVEN)", () => {
+    expect(detectIntent("Kreditni qoplash uchun kuniga nechta sotishim kerak?")).toBe(
+      "CHAINED_LOAN_BREAK_EVEN"
+    );
+    expect(detectIntent("Kreditni qoplash uchun nechta sotay?")).toBe(
+      "CHAINED_LOAN_BREAK_EVEN"
+    );
+    expect(detectIntent("How many units do I need to sell per day to cover the loan?")).toBe(
+      "CHAINED_LOAN_BREAK_EVEN"
+    );
+  });
+});
+
+/* ============================================================
+   2-BOSQICHLI ZANJIR (AGENT CHAINING)
+   ============================================================ */
+
+describe("2-bosqichli agent zanjiri (kredit -> zararsizlik)", () => {
+  it("ikkita vositani ketma-ket hisoblaydi va ikkita qadam qaytaradi", () => {
+    const res = processWithSmartDemoEngine("Kreditni qoplash uchun kuniga nechta sotishim kerak?");
+    expect(res.intent).toBe("CHAINED_LOAN_BREAK_EVEN");
+    expect(res.steps).toHaveLength(2);
+    expect(res.steps?.[0].tool).toBe("calculate_loan");
+    expect(res.steps?.[1].tool).toBe("calculate_break_even");
+    expect(res.content).toContain("2 bosqichli");
+    expect(res.content.replace(/\u00a0/g, " ")).toContain("2 643 555");
+  });
+
+  it("ingliz tilida ham to'liq 2-qadamli zanjirni qaytaradi", () => {
+    const res = processWithSmartDemoEngine(
+      "How many units do I need to sell per day to cover the loan?",
+      "en"
+    );
+    expect(res.intent).toBe("CHAINED_LOAN_BREAK_EVEN");
+    expect(res.steps).toHaveLength(2);
+    expect(res.content).toContain("2-step chained calculation");
+  });
 });
 
 /* ============================================================
@@ -114,6 +152,10 @@ const SHIPPED_PROMPTS: { prompt: string; expected: string }[] = [
     prompt:
       "Urganchda 100 mln so‘m bilan fast food biznes boshlamoqchiman. Yana 50 mln so‘m kredit olishim mumkin. Menga moliyaviy reja tuzib ber.",
     expected: "DEMO_SCENARIO",
+  },
+  {
+    prompt: "Kreditni qoplash uchun kuniga nechta sotishim kerak?",
+    expected: "CHAINED_LOAN_BREAK_EVEN",
   },
   {
     prompt: "50 mln so‘m kreditni 24 oyga 24% bilan olsam oyiga qancha to‘layman?",

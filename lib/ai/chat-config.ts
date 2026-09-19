@@ -33,6 +33,7 @@ export const ChatRequestSchema = z.object({
   userMessage: z.string().max(MAX_MESSAGE_CHARS).optional(),
   messages: z.array(ChatMessageSchema).max(HARD_MESSAGE_LIMIT).optional(),
   locale: z.enum(["uz", "en"]).optional(),
+  stream: z.boolean().optional(),
 });
 
 export type ChatMessage = z.infer<typeof ChatMessageSchema>;

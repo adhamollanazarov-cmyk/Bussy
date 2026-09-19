@@ -2,6 +2,7 @@
 
 import React from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import {
   MessageSquare,
@@ -11,7 +12,6 @@ import {
   Receipt,
   TrendingUp,
   Sliders,
-  Sparkles,
   RefreshCw,
   Home,
   ShieldCheck,
@@ -43,9 +43,16 @@ export function Sidebar({ onCloseMobile }: { onCloseMobile?: () => void }) {
       <div className="flex flex-col">
         {/* Brand Header */}
         <div className="flex h-16 items-center justify-between px-6 border-b border-slate-100">
-          <Link href="/app" className="flex items-center gap-2 group" onClick={onCloseMobile}>
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-900 text-white shadow-md shadow-slate-900/10 group-hover:bg-emerald-600 transition-colors">
-              <Sparkles className="h-5 w-5 text-emerald-400 group-hover:text-white" />
+          <Link href="/app" className="flex items-center gap-2.5 group" onClick={onCloseMobile}>
+            <div className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-xl overflow-hidden bg-white border border-slate-200/80 shadow-xs group-hover:border-blue-400 group-hover:shadow-sm transition-all">
+              <Image
+                src="/logo.png"
+                alt="Bussy"
+                width={36}
+                height={36}
+                className="h-full w-full object-contain p-0.5"
+                priority
+              />
             </div>
             <div className="flex flex-col">
               <span className="text-xl font-bold tracking-tight text-slate-950 flex items-center gap-1.5 font-mono">

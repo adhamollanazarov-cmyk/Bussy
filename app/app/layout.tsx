@@ -1,7 +1,17 @@
 import React from "react";
+import type { Metadata } from "next";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Header } from "@/components/layout/header";
 import { BusinessProvider } from "@/lib/store/business-store";
+
+export const metadata: Metadata = {
+  title: {
+    default: "Boshqaruv paneli",
+    template: "%s | Bussy",
+  },
+  description:
+    "Biznesingizning asosiy moliyaviy ko'rsatkichlari, tushum, xarajat, kredit to'lovi va sof foyda tahlili.",
+};
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (

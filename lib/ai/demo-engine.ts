@@ -21,6 +21,7 @@ export interface ChatResponsePayload {
   content: string;
   intent:
     | "DEMO_SCENARIO"
+    | "CHAINED_LOAN_BREAK_EVEN"
     | "BUSINESS_PLAN"
     | "LOAN_CALCULATION"
     | "PROFIT_CALCULATION"
@@ -34,6 +35,7 @@ export interface ChatResponsePayload {
     | "GENERAL";
   toolCalled?: string;
   toolResult?: unknown;
+  steps?: { tool: string; result: unknown }[];
   quickActions?: { label: string; href?: string; prompt?: string }[];
 }
 
@@ -169,6 +171,16 @@ const INTENT_RULES: { intent: Intent; test: (t: string) => boolean }[] = [
       /biznes-reja|biznes reja|reja tuz|reja tayyorla|business\s*plan|bo‘limli reja/.test(t),
   },
   {
+    // 2-bosqichli agent zanjiri (Kredit -> Zararsizlik)
+    // Kredit va umumiy zararsizlikdan oldin tekshiriladi
+    intent: "CHAINED_LOAN_BREAK_EVEN",
+    test: (t) =>
+      /(kredit|qarz|loan|debt).*(qopla|nechta|sotish|sotay|cover|pay)/.test(t) ||
+      /(qopla|cover|pay).*(kredit|qarz|loan|debt)/.test(t) ||
+      /how many.*(cover|pay).*loan/.test(t) ||
+      /nechta.*kredit/.test(t),
+  },
+  {
     intent: "BREAK_EVEN",
     test: (t) => /break[\s-]?even|zararsiz|qopla|nolga chiq/.test(t),
   },
@@ -192,8 +204,9 @@ const INTENT_RULES: { intent: Intent; test: (t: string) => boolean }[] = [
 ];
 
 export function detectIntent(text: string): Intent {
+  const normalized = text.toLowerCase();
   for (const rule of INTENT_RULES) {
-    if (rule.test(text)) return rule.intent;
+    if (rule.test(normalized)) return rule.intent;
   }
   return "GENERAL";
 }
@@ -260,28 +273,48 @@ export function processWithSmartDemoEngine(
   const { amounts, rate, months } = extractNumbers(text);
   const intent = detectIntent(text);
 
+  let response: ChatResponsePayload;
   switch (intent) {
     case "DEMO_SCENARIO":
-      return handleDemoScenario(locale);
+      response = handleDemoScenario(locale);
+      break;
+    case "CHAINED_LOAN_BREAK_EVEN":
+      response = handleChainedLoanBreakEven(amounts, rate, months, locale);
+      break;
     case "TAX_CALCULATION":
-      return handleTax(text, amounts, rate, locale);
+      response = handleTax(text, amounts, rate, locale);
+      break;
     case "DEBT_BURDEN":
-      return handleDebtBurden(amounts, rate, months, locale);
+      response = handleDebtBurden(amounts, rate, months, locale);
+      break;
     case "BUSINESS_PLAN":
-      return handleBusinessPlan(text, amounts, locale);
+      response = handleBusinessPlan(text, amounts, locale);
+      break;
     case "BREAK_EVEN":
-      return handleBreakEven(text, amounts, locale);
+      response = handleBreakEven(text, amounts, locale);
+      break;
     case "LOAN_CALCULATION":
-      return handleLoan(amounts, rate, months, locale);
+      response = handleLoan(amounts, rate, months, locale);
+      break;
     case "PROFIT_CALCULATION":
-      return handleProfit(amounts, locale);
+      response = handleProfit(amounts, locale);
+      break;
     case "CASHFLOW":
-      return handleCashflow(amounts, locale);
+      response = handleCashflow(amounts, locale);
+      break;
     case "BUSINESS_IDEA_ANALYSIS":
-      return handleBusinessIdea(text, amounts, locale);
+      response = handleBusinessIdea(text, amounts, locale);
+      break;
     default:
-      return handleGeneral(locale);
+      response = handleGeneral(locale);
+      break;
   }
+
+  if (!response.steps && response.toolCalled && response.toolResult) {
+    response.steps = [{ tool: response.toolCalled, result: response.toolResult }];
+  }
+
+  return response;
 }
 
 /* ---------- Demo ssenariy ---------- */
@@ -366,18 +399,130 @@ ${DISCLAIMER.uz}`;
       cashflow: cashflowRes,
       debtBurden: debtRes,
     },
+    steps: [
+      { tool: "calculate_loan", result: loanRes },
+      { tool: "calculate_profit", result: profitRes },
+      { tool: "calculate_break_even", result: breakEvenRes },
+      { tool: "calculate_cashflow", result: cashflowRes },
+      { tool: "analyze_debt_burden", result: debtRes },
+    ],
     content,
     quickActions:
       locale === "en"
         ? [
+            {
+              label: "⚡ How many to cover the loan? (2-step chain)",
+              prompt: "How many units do I need to sell per day to cover the loan?",
+            },
+            { label: "🎛️ Go to the what-if simulator", href: "/app/simulator" },
             { label: "📄 Build a business plan", href: "/app/business-plan" },
-            { label: "💳 View the full loan breakdown", href: "/app/loan" },
-            { label: "📊 Go to the what-if scenario", href: "/app/simulator" },
+            { label: "💳 View full loan breakdown", href: "/app/loan" },
           ]
         : [
+            {
+              label: "⚡ Kreditni qoplash uchun kuniga nechta sotish kerak?",
+              prompt: "Kreditni qoplash uchun kuniga nechta sotishim kerak?",
+            },
+            { label: "🎛️ What-if simulyatoriga o‘tish", href: "/app/simulator" },
             { label: "📄 Biznes-reja yaratish", href: "/app/business-plan" },
             { label: "💳 Kreditni batafsil hisoblash", href: "/app/loan" },
-            { label: "📊 What-if scenarioga o‘tish", href: "/app/simulator" },
+          ],
+  };
+}
+
+/* ---------- 2-bosqichli zanjir (Agent Chaining): Kredit -> Zararsizlik ---------- */
+
+function handleChainedLoanBreakEven(
+  amounts: number[],
+  rate: number | null,
+  months: number | null,
+  locale: Locale
+): ChatResponsePayload {
+  const loanAmount = amounts[0] && amounts[0] >= 1_000_000 ? amounts[0] : 50_000_000;
+  const annualRate = rate ?? 24;
+  const loanMonths = months ?? 24;
+
+  // 1-bosqich: Kredit hisobi
+  const loanRes = calculateLoan({ amount: loanAmount, annualRate, months: loanMonths });
+
+  // 2-bosqich: Birlik iqtisodiyoti va zararsizlik
+  const unit = resolveUnitEconomics("fast food", locale);
+  const unitMargin = unit.sellingPrice - unit.variableCostPerUnit;
+
+  // Faqat kredit to'lovini qoplash uchun talab qilinadigan hajm
+  const loanUnitsNeeded = Math.ceil(loanRes.monthlyPayment / unitMargin);
+  const loanDailyUnitsNeeded = Math.ceil(loanUnitsNeeded / 30);
+
+  // Bazaviy o'zgarmas xarajat (Urganch Fast Food demo baseline: 28M x 0.55 = 15.4M) + kredit to'lovi
+  const baselineFixedCost = 15_400_000;
+  const totalFixedCostWithLoan = baselineFixedCost + loanRes.monthlyPayment;
+
+  const breakEvenRes = calculateBreakEven({
+    fixedCost: totalFixedCostWithLoan,
+    sellingPrice: unit.sellingPrice,
+    variableCostPerUnit: unit.variableCostPerUnit,
+  });
+
+  const content =
+    locale === "en"
+      ? `To answer this accurately, Bussy performed a **2-step chained calculation (Agent Chaining)**:
+
+### 1️⃣ Step 1: Determining monthly loan payment (\`calculate_loan\`)
+- **Loan amount**: ${formatMoney(loanRes.amount)} (${annualRate}% annual rate, ${loanMonths} months)
+- **Monthly annuity payment**: **${formatMoney(loanRes.monthlyPayment)}/mo**
+
+### 2️⃣ Step 2: Break-even sales volume (\`calculate_break_even\`)
+Fast Food unit economics (${unit.unitLabel} price: ${formatMoney(unit.sellingPrice)}, variable cost: ${formatMoney(unit.variableCostPerUnit)}, unit margin: **${formatMoney(unitMargin)}**):
+- **To cover the loan payment alone**: you must sell at least **${loanUnitsNeeded.toLocaleString("en-US")} ${unit.unitLabel}s/month** (~**${loanDailyUnitsNeeded} per day**).
+- **To cover all operating fixed costs + loan**: you need **${breakEvenRes.breakEvenUnits.toLocaleString("en-US")} ${unit.unitLabel}s/month** (~**${breakEvenRes.dailyUnits} per day**).
+
+### 💡 Bussy's conclusion:
+Servicing this loan requires selling only an additional **${loanDailyUnitsNeeded} ${unit.unitLabel}s per day**. Every unit sold beyond ~${breakEvenRes.dailyUnits}/day directly becomes your **net profit**.
+
+${DISCLAIMER.en}`
+      : `Ushbu savolga aniq javob berish uchun ketma-ket **2 bosqichli hisob-kitob (Agent Chaining)** o‘tkazildi:
+
+### 1️⃣ 1-bosqich: Kredit oylik to‘lovini aniqlash (\`calculate_loan\`)
+- **Kredit summasi**: ${formatMoney(loanRes.amount)} (yillik ${annualRate}%, ${loanMonths} oy muddat)
+- **Oylik annuitet to‘lov**: **${formatMoney(loanRes.monthlyPayment)}/oy**
+
+### 2️⃣ 2-bosqich: Zararsizlik nuqtasini hisoblash (\`calculate_break_even\`)
+Fast Food birlik iqtisodiyoti (${unit.unitLabel} narxi: ${formatMoney(unit.sellingPrice)}, tannarxi: ${formatMoney(unit.variableCostPerUnit)}, 1 ta mahsulot sof marjasi: **${formatMoney(unitMargin)}**):
+- **Faqat kredit to‘lovini qoplash uchun**: oyiga kamida **${loanUnitsNeeded.toLocaleString("ru-RU")} ta** (kuniga **${loanDailyUnitsNeeded} ta**) ${unit.unitLabel} sotish kerak.
+- **Barcha o‘zgarmas xarajatlar + kredit to‘lovini to‘liq qoplash uchun**: oyiga jami **${breakEvenRes.breakEvenUnits.toLocaleString("ru-RU")} ta** (kuniga o‘rtacha **${breakEvenRes.dailyUnits} ta**) sotishingiz talab etiladi.
+
+### 💡 Bussy xulosasi:
+Kredit yuki biznesingizdan kuniga qo‘shimcha atigi **${loanDailyUnitsNeeded} ta** mijozga xizmat ko‘rsatishni talab qiladi. Kuniga ${breakEvenRes.dailyUnits} tadan ortiq sotilgan har bir ${unit.unitLabel} esa to‘g‘ridan-to‘g‘ri sizning **sof foydangizga** aylanadi.
+
+${DISCLAIMER.uz}`;
+
+  return {
+    role: "assistant",
+    intent: "CHAINED_LOAN_BREAK_EVEN",
+    toolCalled: "calculate_break_even",
+    toolResult: {
+      loan: loanRes,
+      breakEven: breakEvenRes,
+      loanUnitsNeeded,
+      loanDailyUnitsNeeded,
+      unitMargin,
+    },
+    steps: [
+      { tool: "calculate_loan", result: loanRes },
+      { tool: "calculate_break_even", result: breakEvenRes },
+    ],
+    content,
+    quickActions:
+      locale === "en"
+        ? [
+            { label: "🎛️ Test what-if simulator", href: "/app/simulator" },
+            { label: "📄 Build 11-section business plan", href: "/app/business-plan" },
+            { label: "💳 View full loan schedule", href: "/app/loan" },
+          ]
+        : [
+            { label: "🎛️ What-if simulyatorini sinash", href: "/app/simulator" },
+            { label: "📄 11 bo‘limli biznes-reja tuzish", href: "/app/business-plan" },
+            { label: "💳 To‘liq kredit jadvali", href: "/app/loan" },
           ],
   };
 }

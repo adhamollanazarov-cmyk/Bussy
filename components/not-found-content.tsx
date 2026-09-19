@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { Compass, ArrowRight, MessageSquare } from "lucide-react";
+import Image from "next/image";
+import { ArrowRight, MessageSquare } from "lucide-react";
 import { useLanguage } from "@/lib/i18n/language-store";
 
 export function NotFoundContent() {
@@ -10,8 +11,14 @@ export function NotFoundContent() {
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-slate-50 px-4 py-16 text-center">
       <div className="w-full max-w-md space-y-6">
-        <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-3xl bg-slate-900 text-emerald-400 shadow-lg shadow-slate-900/10">
-          <Compass className="h-7 w-7" />
+        <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-3xl overflow-hidden bg-white border border-slate-200/80 shadow-md">
+          <Image
+            src="/logo.png"
+            alt="Bussy"
+            width={64}
+            height={64}
+            className="h-full w-full object-contain p-2"
+          />
         </div>
 
         <div className="space-y-2">

@@ -36,13 +36,18 @@ export const BUSSY_TOOLS = [
     type: "function" as const,
     function: {
       name: "calculate_break_even",
-      description: "Zararsizlik (break-even) nuqtasini dona va so‘mda hisoblash",
+      description:
+        "Zararsizlik (break-even) nuqtasini dona va so‘mda hisoblash. Kredit to‘lovini qoplash yoki zararsizlikka chiqish uchun kuniga va oyiga nechta mahsulot sotish kerakligini hisoblaydi.",
       parameters: {
         type: "object",
         properties: {
-          fixed_cost: { type: "number", description: "Oylik o‘zgarmas xarajatlar (so‘mda)" },
-          selling_price: { type: "number", description: "Bitta mahsulot/chek o‘rtacha sotish narxi" },
-          variable_cost: { type: "number", description: "Bitta mahsulotning o‘zgaruvchan tannarxi" },
+          fixed_cost: {
+            type: "number",
+            description:
+              "Oylik o‘zgarmas xarajatlar (so‘mda). Kreditni qoplash tahlilida kredit oylik to‘lovi ham o‘zgarmas xarajatga qo‘shiladi.",
+          },
+          selling_price: { type: "number", description: "Bitta mahsulot/chek o‘rtacha sotish narxi (so‘mda)" },
+          variable_cost: { type: "number", description: "Bitta mahsulotning o‘zgaruvchan tannarxi (so‘mda)" },
         },
         required: ["fixed_cost", "selling_price", "variable_cost"],
       },

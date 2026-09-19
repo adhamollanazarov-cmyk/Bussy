@@ -15,7 +15,10 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Bussy — Biznesingiz uchun aqlli yordamchi | AI Moliyaviy Maslahatchi",
+  title: {
+    default: "Bussy — Biznesingiz uchun aqlli yordamchi | AI Moliyaviy Maslahatchi",
+    template: "%s | Bussy",
+  },
   description:
     "Kichik va o‘rta biznes egalari uchun AI moliyaviy maslahatchi: kredit kalkulyatori, 11 bo‘limli biznes-reja, foyda va break-even tahlili, what-if simulyatori.",
   keywords: [
@@ -27,6 +30,11 @@ export const metadata: Metadata = {
     "fintech",
     "tadbirkorlik",
   ],
+  icons: {
+    icon: "/logo.png",
+    shortcut: "/logo.png",
+    apple: "/logo.png",
+  },
 };
 
 export default function RootLayout({

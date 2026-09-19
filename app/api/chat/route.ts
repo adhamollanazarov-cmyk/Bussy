@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { processWithSmartDemoEngine } from "@/lib/ai/demo-engine";
+import { processWithSmartDemoEngine, detectIntent } from "@/lib/ai/demo-engine";
 import { getSystemPrompt } from "@/lib/ai/prompts";
 import { BUSSY_TOOLS } from "@/lib/ai/tools";
 import { runTool, type ToolArgs } from "@/lib/ai/run-tool";
@@ -128,7 +128,8 @@ interface AgentStep {
 async function runAgent(
   apiKey: string,
   conversation: ChatMessage[],
-  locale: Locale
+  locale: Locale,
+  onStep?: (step: AgentStep) => void
 ): Promise<{ content: string; steps: AgentStep[] } | null> {
   const messages: OpenAIMessage[] = [
     { role: "system", content: getSystemPrompt(locale) },
@@ -186,7 +187,9 @@ async function runAgent(
         continue;
       }
 
-      steps.push({ tool: call.function.name, result: output });
+      const stepItem = { tool: call.function.name, result: output };
+      steps.push(stepItem);
+      onStep?.(stepItem);
       messages.push({
         role: "tool",
         tool_call_id: call.id,
@@ -219,7 +222,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const { messages, userMessage, locale = "uz" } = parsed.data;
+    const { messages, userMessage, locale = "uz", stream = false } = parsed.data;
     const query = (userMessage || messages?.[messages.length - 1]?.content || "").trim();
 
     if (!query) {
@@ -250,6 +253,121 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // --- STRIMING (PROGRESS) YO'NALISHI ---
+    if (stream) {
+      const encoder = new TextEncoder();
+      const readableStream = new ReadableStream({
+        async start(controller) {
+          const send = (data: unknown) => {
+            try {
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+            } catch {
+              // Mijoz aloqani uzgan bo'lishi mumkin
+            }
+          };
+
+          try {
+            if (apiKey) {
+              send({
+                type: "status",
+                message:
+                  locale === "en"
+                    ? "AI agent is analyzing the request..."
+                    : "AI agent so‘rovni tahlil qilmoqda...",
+              });
+
+              const conversation = trimConversation(
+                messages?.length ? messages : [{ role: "user", content: query }]
+              );
+
+              const result = await runAgent(apiKey, conversation, locale, (step) => {
+                send({ type: "step", step });
+              });
+
+              if (result) {
+                const isChaining = detectIntent(query) === "CHAINED_LOAN_BREAK_EVEN";
+                if (!isChaining || result.steps.length >= 2) {
+                  const last = result.steps[result.steps.length - 1];
+                  send({
+                    type: "done",
+                    message: {
+                      role: "assistant",
+                      content: result.content,
+                      toolCalled: last?.tool,
+                      toolResult: last?.result,
+                      steps: result.steps,
+                      source: "ai",
+                    },
+                  });
+                  controller.close();
+                  return;
+                }
+              }
+            }
+
+            // OpenAI bo'lmasa yoki rad etilsa — aqlli lokal dvigatel
+            const engineResult = processWithSmartDemoEngine(query, locale);
+            const steps = engineResult.steps || [];
+
+            send({
+              type: "status",
+              message:
+                locale === "en"
+                  ? "Bussy calculation engine started..."
+                  : "Bussy hisoblash dvigateli ishga tushdi...",
+            });
+
+            // Har bir qadamni ketma-ket chiqarish
+            for (let i = 0; i < steps.length; i++) {
+              await new Promise((r) => setTimeout(r, 260));
+              send({ type: "step", step: steps[i], index: i, total: steps.length });
+            }
+
+            if (steps.length > 0) {
+              await new Promise((r) => setTimeout(r, 180));
+            }
+
+            const last = steps[steps.length - 1];
+            send({
+              type: "done",
+              message: {
+                ...engineResult,
+                role: "assistant",
+                toolCalled: engineResult.toolCalled || last?.tool,
+                toolResult: engineResult.toolResult || last?.result,
+                steps,
+                source: apiKey ? "fallback" : "local",
+              },
+            });
+          } catch (err) {
+            console.error("Streaming error:", err);
+            send({
+              type: "error",
+              error:
+                locale === "en"
+                  ? "An error occurred while processing."
+                  : "Hisob-kitob jarayonida xatolik yuz berdi.",
+            });
+          } finally {
+            try {
+              controller.close();
+            } catch {
+              // allready closed
+            }
+          }
+        },
+      });
+
+      return new Response(readableStream, {
+        headers: {
+          "Content-Type": "text/event-stream; charset=utf-8",
+          "Cache-Control": "no-cache, no-transform",
+          "Connection": "keep-alive",
+        },
+      });
+    }
+
+    // --- AN'ANAVIY JSON JAVOB (TESTLAR VA ODDIY SO'ROVLAR UCHUN) ---
     if (apiKey) {
       try {
         // Rad etish emas, qisqartirish (H1)
@@ -260,17 +378,20 @@ export async function POST(req: NextRequest) {
         const result = await runAgent(apiKey, conversation, locale);
 
         if (result) {
-          const last = result.steps[result.steps.length - 1];
-          return NextResponse.json({
-            role: "assistant",
-            content: result.content,
-            // Eski mijozlar uchun moslik
-            toolCalled: last?.tool,
-            toolResult: last?.result,
-            // Barcha qadamlar — UI ularning hammasini ko'rsatadi
-            steps: result.steps,
-            source: "ai",
-          });
+          const isChaining = detectIntent(query) === "CHAINED_LOAN_BREAK_EVEN";
+          if (!isChaining || result.steps.length >= 2) {
+            const last = result.steps[result.steps.length - 1];
+            return NextResponse.json({
+              role: "assistant",
+              content: result.content,
+              // Eski mijozlar uchun moslik
+              toolCalled: last?.tool,
+              toolResult: last?.result,
+              // Barcha qadamlar — UI ularning hammasini ko'rsatadi
+              steps: result.steps,
+              source: "ai",
+            });
+          }
         }
       } catch (err) {
         console.warn("OpenAI agent failed, falling back to Smart Demo Engine:", err);
