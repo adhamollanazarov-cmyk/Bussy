@@ -27,58 +27,13 @@ import {
 const OPENAI_TIMEOUT_MS = 30_000;
 const OPENAI_MODEL = "gpt-4o-mini";
 
-/* ============================================================
-   TEZLIK CHEKLOVI (RATE LIMIT)
-   ------------------------------------------------------------
-   Xotirada saqlanadi — bitta instans uchun. Serverless/ko'p instansli
-   muhitda Redis (masalan Upstash) kerak bo'ladi.
-   ============================================================ */
-
-const RATE_WINDOW_MS = 60_000;
-/** Pullik (OpenAI) yo'l uchun — kalitni himoya qiladi. */
-const RATE_MAX_AI = 12;
-/** Lokal hisoblash dvigateli uchun — tashqi xarajat yo'q, faqat DoS himoyasi. */
-const RATE_MAX_LOCAL = 60;
-/** Barcha mijozlar bo'yicha umumiy AI chegarasi — sarfni cheklaydi. */
-const RATE_MAX_AI_GLOBAL = 120;
-
-const buckets = new Map<string, { count: number; resetAt: number }>();
-
-/**
- * Mijoz identifikatori.
- *
- * `x-forwarded-for` ni mijozning o'zi yubora oladi, shuning uchun unga
- * oxirgi navbatda ishonamiz. Platforma o'rnatadigan sarlavhalar (Vercel)
- * ustunlikka ega — ularni mijoz soxtalashtira olmaydi.
- */
-function getClientKey(req: NextRequest): string {
-  const trusted =
-    req.headers.get("x-vercel-forwarded-for") ||
-    req.headers.get("cf-connecting-ip") ||
-    req.headers.get("x-real-ip");
-  if (trusted) return trusted.split(",")[0].trim();
-
-  const forwarded = req.headers.get("x-forwarded-for");
-  if (forwarded) return "xff:" + forwarded.split(",")[0].trim();
-
-  return "unknown";
-}
-
-function hit(key: string, max: number): boolean {
-  const now = Date.now();
-  const bucket = buckets.get(key);
-
-  if (!bucket || now > bucket.resetAt) {
-    buckets.set(key, { count: 1, resetAt: now + RATE_WINDOW_MS });
-    if (buckets.size > 5_000) {
-      for (const [k, v] of buckets) if (now > v.resetAt) buckets.delete(k);
-    }
-    return false;
-  }
-
-  bucket.count += 1;
-  return bucket.count > max;
-}
+import {
+  getClientKey,
+  checkRateLimit,
+  RATE_MAX_AI,
+  RATE_MAX_LOCAL,
+  RATE_MAX_AI_GLOBAL,
+} from "@/lib/ai/rate-limiter";
 
 /* ============================================================
    OPENAI
@@ -129,7 +84,7 @@ async function runAgent(
   apiKey: string,
   conversation: ChatMessage[],
   locale: Locale,
-  onStep?: (step: AgentStep) => void
+  onStep?: (step: AgentStep) => void,
 ): Promise<{ content: string; steps: AgentStep[] } | null> {
   const messages: OpenAIMessage[] = [
     { role: "system", content: getSystemPrompt(locale) },
@@ -211,24 +166,36 @@ export async function POST(req: NextRequest) {
     try {
       rawBody = await req.json();
     } catch {
-      return NextResponse.json({ error: "So‘rov formati noto‘g‘ri." }, { status: 400 });
+      return NextResponse.json(
+        { error: "So‘rov formati noto‘g‘ri." },
+        { status: 400 },
+      );
     }
 
     const parsed = ChatRequestSchema.safeParse(rawBody);
     if (!parsed.success) {
       return NextResponse.json(
         { error: "So‘rov ma’lumotlari noto‘g‘ri yoki juda uzun." },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
-    const { messages, userMessage, locale = "uz", stream = false } = parsed.data;
-    const query = (userMessage || messages?.[messages.length - 1]?.content || "").trim();
+    const {
+      messages,
+      userMessage,
+      locale = "uz",
+      stream = false,
+    } = parsed.data;
+    const query = (
+      userMessage ||
+      messages?.[messages.length - 1]?.content ||
+      ""
+    ).trim();
 
     if (!query) {
       return NextResponse.json(
         { error: "Xabar matni bo‘sh bo‘lishi mumkin emas." },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -238,8 +205,9 @@ export async function POST(req: NextRequest) {
     // Chegara pullik yo'lda qattiqroq: lokal dvigatelda tashqi xarajat yo'q,
     // shuning uchun demo rejimida foydalanuvchini bo'g'ib qo'ymaymiz.
     const limited = apiKey
-      ? hit(`ai:${clientKey}`, RATE_MAX_AI) || hit("ai:__global__", RATE_MAX_AI_GLOBAL)
-      : hit(`local:${clientKey}`, RATE_MAX_LOCAL);
+      ? (await checkRateLimit(`ai:${clientKey}`, RATE_MAX_AI)) ||
+        (await checkRateLimit("ai:__global__", RATE_MAX_AI_GLOBAL))
+      : await checkRateLimit(`local:${clientKey}`, RATE_MAX_LOCAL);
 
     if (limited) {
       return NextResponse.json(
@@ -249,7 +217,7 @@ export async function POST(req: NextRequest) {
               ? "Too many requests. Please try again in a minute."
               : "Juda ko‘p so‘rov yuborildi. Bir daqiqadan so‘ng qayta urinib ko‘ring.",
         },
-        { status: 429 }
+        { status: 429 },
       );
     }
 
@@ -260,7 +228,9 @@ export async function POST(req: NextRequest) {
         async start(controller) {
           const send = (data: unknown) => {
             try {
-              controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+              controller.enqueue(
+                encoder.encode(`data: ${JSON.stringify(data)}\n\n`),
+              );
             } catch {
               // Mijoz aloqani uzgan bo'lishi mumkin
             }
@@ -268,40 +238,55 @@ export async function POST(req: NextRequest) {
 
           try {
             if (apiKey) {
-              send({
-                type: "status",
-                message:
-                  locale === "en"
-                    ? "AI agent is analyzing the request..."
-                    : "AI agent so‘rovni tahlil qilmoqda...",
-              });
+              try {
+                send({
+                  type: "status",
+                  message:
+                    locale === "en"
+                      ? "AI agent is analyzing the request..."
+                      : "AI agent so‘rovni tahlil qilmoqda...",
+                });
 
-              const conversation = trimConversation(
-                messages?.length ? messages : [{ role: "user", content: query }]
-              );
+                const conversation = trimConversation(
+                  messages?.length
+                    ? messages
+                    : [{ role: "user", content: query }],
+                );
 
-              const result = await runAgent(apiKey, conversation, locale, (step) => {
-                send({ type: "step", step });
-              });
+                const result = await runAgent(
+                  apiKey,
+                  conversation,
+                  locale,
+                  (step) => {
+                    send({ type: "step", step });
+                  },
+                );
 
-              if (result) {
-                const isChaining = detectIntent(query) === "CHAINED_LOAN_BREAK_EVEN";
-                if (!isChaining || result.steps.length >= 2) {
-                  const last = result.steps[result.steps.length - 1];
-                  send({
-                    type: "done",
-                    message: {
-                      role: "assistant",
-                      content: result.content,
-                      toolCalled: last?.tool,
-                      toolResult: last?.result,
-                      steps: result.steps,
-                      source: "ai",
-                    },
-                  });
-                  controller.close();
-                  return;
+                if (result) {
+                  const isChaining =
+                    detectIntent(query) === "CHAINED_LOAN_BREAK_EVEN";
+                  if (!isChaining || result.steps.length >= 2) {
+                    const last = result.steps[result.steps.length - 1];
+                    send({
+                      type: "done",
+                      message: {
+                        role: "assistant",
+                        content: result.content,
+                        toolCalled: last?.tool,
+                        toolResult: last?.result,
+                        steps: result.steps,
+                        source: "ai",
+                      },
+                    });
+                    controller.close();
+                    return;
+                  }
                 }
+              } catch (err) {
+                console.warn(
+                  "OpenAI streaming agent failed, falling back to Smart Demo Engine:",
+                  err,
+                );
               }
             }
 
@@ -320,7 +305,12 @@ export async function POST(req: NextRequest) {
             // Har bir qadamni ketma-ket chiqarish
             for (let i = 0; i < steps.length; i++) {
               await new Promise((r) => setTimeout(r, 260));
-              send({ type: "step", step: steps[i], index: i, total: steps.length });
+              send({
+                type: "step",
+                step: steps[i],
+                index: i,
+                total: steps.length,
+              });
             }
 
             if (steps.length > 0) {
@@ -362,7 +352,7 @@ export async function POST(req: NextRequest) {
         headers: {
           "Content-Type": "text/event-stream; charset=utf-8",
           "Cache-Control": "no-cache, no-transform",
-          "Connection": "keep-alive",
+          Connection: "keep-alive",
         },
       });
     }
@@ -372,7 +362,7 @@ export async function POST(req: NextRequest) {
       try {
         // Rad etish emas, qisqartirish (H1)
         const conversation = trimConversation(
-          messages?.length ? messages : [{ role: "user", content: query }]
+          messages?.length ? messages : [{ role: "user", content: query }],
         );
 
         const result = await runAgent(apiKey, conversation, locale);
@@ -394,7 +384,10 @@ export async function POST(req: NextRequest) {
           }
         }
       } catch (err) {
-        console.warn("OpenAI agent failed, falling back to Smart Demo Engine:", err);
+        console.warn(
+          "OpenAI agent failed, falling back to Smart Demo Engine:",
+          err,
+        );
       }
     }
 
@@ -406,8 +399,11 @@ export async function POST(req: NextRequest) {
   } catch (error) {
     console.error("Chat API error:", error);
     return NextResponse.json(
-      { error: "Hozir AI xizmati vaqtincha ishlamayapti. Demo rejimida davom etishingiz mumkin." },
-      { status: 500 }
+      {
+        error:
+          "Hozir AI xizmati vaqtincha ishlamayapti. Demo rejimida davom etishingiz mumkin.",
+      },
+      { status: 500 },
     );
   }
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useMemo } from "react";
-import { Receipt, ShieldAlert, Check } from "lucide-react";
+import { Receipt, ShieldAlert, Check, Calculator } from "lucide-react";
 import { calculateTax, getRegimeCopy, TaxRegimeType, UZ_TAX_REGIMES } from "@/lib/engine/tax";
 import { useBusiness, useSeededState } from "@/lib/store/business-store";
 import { useLanguage } from "@/lib/i18n/language-store";
@@ -9,9 +9,10 @@ import { formatMoney, formatPercent, parseNumberInput } from "@/lib/utils";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 
 export default function TaxCalculatorPage() {
-  const { business } = useBusiness();
+  const { business, role } = useBusiness();
   const { t, locale } = useLanguage();
 
   const [selectedRegime, setSelectedRegime] = useState<TaxRegimeType>("turnover");
@@ -21,6 +22,7 @@ export default function TaxCalculatorPage() {
   // QQS bazasini foydalanuvchi aniqlashtira olishi kerak — standart 60% taxmin
   // QQS summasini sezilarli o'zgartiradi.
   const [vatableExpenses, setVatableExpenses] = useState<number | undefined>(undefined);
+  const [showComparison, setShowComparison] = useState(false);
 
   const taxResult = useMemo(() => {
     return calculateTax({
@@ -33,6 +35,29 @@ export default function TaxCalculatorPage() {
     });
   }, [selectedRegime, revenue, expenses, customRate, vatableExpenses, locale]);
 
+  // Buxgalter roli yoki soliq taqqoslash rejimi uchun 3 ta rejimni parallel hisoblash
+  const allRegimesComparison = useMemo(() => {
+    const regimes: TaxRegimeType[] = ["turnover", "general", "individual"];
+    const results = regimes.map((r) => {
+      const res = calculateTax({
+        regime: r,
+        revenue,
+        expenses,
+        customRate: r === selectedRegime ? customRate : undefined,
+        vatableExpenses: r === "general" ? vatableExpenses : undefined,
+        locale,
+      });
+      const copy = getRegimeCopy(r, locale);
+      return { regime: r, copy, res };
+    });
+
+    const optimal = [...results].sort((a, b) => a.res.taxAmount - b.res.taxAmount)[0];
+    const worst = [...results].sort((a, b) => b.res.taxAmount - a.res.taxAmount)[0];
+    const annualSavings = (worst.res.taxAmount - optimal.res.taxAmount) * 12;
+
+    return { results, optimal, annualSavings };
+  }, [revenue, expenses, selectedRegime, customRate, vatableExpenses, locale]);
+
   return (
     <div className="space-y-6">
       {/* Title */}
@@ -44,7 +69,18 @@ export default function TaxCalculatorPage() {
           </h1>
           <p className="text-sm text-slate-500">{t.tax.pageDesc}</p>
         </div>
-        <Badge variant="warning">{t.tax.demoBadge}</Badge>
+        <div className="flex items-center gap-2">
+          <Button
+            variant={showComparison || role === "accountant" ? "primary" : "outline"}
+            size="sm"
+            onClick={() => setShowComparison((prev) => !prev)}
+            className="text-xs font-semibold"
+          >
+            <Calculator className="h-3.5 w-3.5 mr-1" />
+            <span>{t.tax.comparisonHeading.split("(")[0]}</span>
+          </Button>
+          <Badge variant="warning">{t.tax.demoBadge}</Badge>
+        </div>
       </div>
 
       {/* Legal & Regulatory Disclaimer Banner */}
@@ -55,6 +91,82 @@ export default function TaxCalculatorPage() {
           <p className="leading-relaxed">{t.tax.disclaimerBody}</p>
         </div>
       </div>
+
+      {/* Accountant / Comparison View: 3 Regimes Side-by-Side Audit Card */}
+      {(role === "accountant" || showComparison) && (
+        <Card className="border-emerald-200 bg-gradient-to-br from-emerald-50/40 via-white to-white shadow-xs">
+          <CardHeader className="pb-3 border-b border-emerald-100">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <CardTitle className="text-base flex items-center gap-2 text-emerald-950">
+                  <Calculator className="h-5 w-5 text-emerald-600" />
+                  <span>{t.tax.comparisonHeading}</span>
+                </CardTitle>
+                <p className="text-xs text-slate-500 mt-0.5">{t.tax.comparisonSub}</p>
+              </div>
+              <Badge variant="success" className="self-start sm:self-auto font-semibold">
+                {t.tax.optimalRegimeBadge}: {allRegimesComparison.optimal.copy.name.split("(")[0]}
+              </Badge>
+            </div>
+          </CardHeader>
+          <CardContent className="pt-4 space-y-4">
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs text-left">
+                <thead className="border-b border-slate-200 text-slate-500 font-semibold uppercase text-[10px]">
+                  <tr>
+                    <th className="py-2.5 px-3">{t.tax.regimeCol}</th>
+                    <th className="py-2.5 px-3">{t.tax.taxBaseCol}</th>
+                    <th className="py-2.5 px-3">{t.tax.taxAmountCol}</th>
+                    <th className="py-2.5 px-3">{t.tax.effectiveRateCol}</th>
+                    <th className="py-2.5 px-3">{t.tax.profitAfterTaxCol}</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {allRegimesComparison.results.map(({ regime, copy, res }) => {
+                    const isOptimal = regime === allRegimesComparison.optimal.regime;
+                    return (
+                      <tr
+                        key={regime}
+                        className={isOptimal ? "bg-emerald-50/70 font-semibold" : "hover:bg-slate-50"}
+                      >
+                        <td className="py-3 px-3">
+                          <div className="flex items-center gap-1.5">
+                            <span>{copy.name.split("(")[0]}</span>
+                            {isOptimal && (
+                              <span className="text-[10px] bg-emerald-600 text-white px-1.5 py-0.5 rounded font-bold">
+                                {t.tax.optimalRegimeBadge}
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="py-3 px-3 font-mono">{formatMoney(res.taxBase)}</td>
+                        <td className="py-3 px-3 font-mono text-rose-600 font-bold">
+                          {formatMoney(res.taxAmount)}
+                        </td>
+                        <td className="py-3 px-3 font-mono">{formatPercent(res.effectiveTaxRate)}</td>
+                        <td className="py-3 px-3 font-mono text-emerald-700 font-bold">
+                          {formatMoney(res.profitAfterTax)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {allRegimesComparison.annualSavings > 0 && (
+              <div className="rounded-xl border border-emerald-300 bg-emerald-100/60 p-3 text-xs text-emerald-900 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <span>
+                  💡 <strong>{t.tax.optimalRegimeBadge}:</strong> {allRegimesComparison.optimal.copy.name.split("(")[0]} rejimini tanlash orqali:
+                </span>
+                <span className="font-bold text-sm text-emerald-800">
+                  {t.tax.taxDiffLabel.replace("{amount}", formatMoney(allRegimesComparison.annualSavings))}
+                </span>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Regime Selector Tabs */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">

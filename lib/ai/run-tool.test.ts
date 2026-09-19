@@ -46,7 +46,11 @@ describe("runTool", () => {
 
   it("yaroqsiz argumentlarda ham xato tashlamaydi", () => {
     expect(() =>
-      runTool("calculate_loan", { amount: "ko‘p", annual_rate: null, months: undefined })
+      runTool("calculate_loan", {
+        amount: "ko‘p",
+        annual_rate: null,
+        months: undefined,
+      }),
     ).not.toThrow();
   });
 
@@ -56,10 +60,23 @@ describe("runTool", () => {
       revenue: 100_000_000,
       expenses: 60_000_000,
       vatable_expenses: 60_000_000,
+      is_vat_inclusive: false,
     }) as { breakdown: { label: string; amount: number }[] };
 
     const vatLine = withVat.breakdown.find((b) => b.label.includes("QQS"));
     // Qo'shilgan qiymat = 100 - 60 = 40 mln, QQS = 4.8 mln
     expect(vatLine?.amount).toBe(4_800_000);
+  });
+
+  it("calculate_tax is_vat_inclusive standart (true) bo'yicha 12/112 hisoblaydi", () => {
+    const withVat = runTool("calculate_tax", {
+      regime: "general",
+      revenue: 112_000_000,
+      expenses: 56_000_000,
+      vatable_expenses: 56_000_000,
+    }) as { breakdown: { label: string; amount: number }[] };
+
+    const vatLine = withVat.breakdown.find((b) => b.label.includes("QQS"));
+    expect(vatLine?.amount).toBe(6_000_000);
   });
 });

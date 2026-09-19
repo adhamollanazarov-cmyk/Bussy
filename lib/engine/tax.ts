@@ -17,26 +17,32 @@ export const UZ_TAX_REGIMES: Record<TaxRegimeType, TaxRegimeConfig> = {
   turnover: {
     id: "turnover",
     name: "Aylanmadan olinadigan soliq (Soddalashtirilgan)",
-    description: "Yillik aylanmasi 1 mlrd so‘mgacha bo‘lgan korxonalar uchun. Barcha tushumdan qat'iy foiz to‘lanadi.",
+    description:
+      "Yillik aylanmasi 1 mlrd so‘mgacha bo‘lgan korxonalar uchun. Barcha tushumdan qat'iy foiz to‘lanadi.",
     defaultRatePercent: 4, // 4% standart stavka
   },
   general: {
     id: "general",
     name: "Umumiy soliq tizimi (Foyda solig‘i + QQS)",
-    description: "Yillik aylanmasi 1 mlrd so‘mdan oshgan yoki ixtiyoriy o‘tgan korxonalar uchun. Sof foydadan soliq + 12% QQS.",
+    description:
+      "Yillik aylanmasi 1 mlrd so‘mdan oshgan yoki ixtiyoriy o‘tgan korxonalar uchun. Sof foydadan soliq + 12% QQS.",
     profitTaxPercent: 15, // 15% foyda solig'i (2023-yildan amaldagi umumiy stavka)
     vatPercent: 12, // 12% QQS
   },
   individual: {
     id: "individual",
     name: "YaTT qat'iy belgilangan soliq",
-    description: "Yakka tartibdagi tadbirkorlar uchun faoliyat turi va hududiga qarab oylik qat'iy belgilangan to‘lov.",
+    description:
+      "Yakka tartibdagi tadbirkorlar uchun faoliyat turi va hududiga qarab oylik qat'iy belgilangan to‘lov.",
     fixedMonthlyAmount: 500_000,
     socialTaxMonthlyAmount: 375_000,
   },
 };
 
-const EN_TAX_REGIME_COPY: Record<TaxRegimeType, { name: string; description: string }> = {
+const EN_TAX_REGIME_COPY: Record<
+  TaxRegimeType,
+  { name: string; description: string }
+> = {
   turnover: {
     name: "Turnover tax (simplified)",
     description:
@@ -56,7 +62,10 @@ const EN_TAX_REGIME_COPY: Record<TaxRegimeType, { name: string; description: str
 
 export function getRegimeCopy(regime: TaxRegimeType, locale: Locale = "uz") {
   if (locale === "en") return EN_TAX_REGIME_COPY[regime];
-  return { name: UZ_TAX_REGIMES[regime].name, description: UZ_TAX_REGIMES[regime].description };
+  return {
+    name: UZ_TAX_REGIMES[regime].name,
+    description: UZ_TAX_REGIMES[regime].description,
+  };
 }
 
 export interface TaxCalculationInput {
@@ -79,6 +88,12 @@ export interface TaxCalculationInput {
    * Berilmasa, `expenses` ning taxminan 60% i kirim QQSiga ega deb olinadi.
    */
   vatableExpenses?: number;
+  /**
+   * Kiritilgan tushum va xarajatlar summasi QQS ichida (yalpi / gross) yoki QQSsiz (net).
+   * Standart: `true` (chunki tadbirkor odatda kassadagi yalpi tushumni kiritadi).
+   * `false` bo'lsa, tushum QQSsiz deb olinib, 12% ustama sifatida hisoblanadi.
+   */
+  isVatInclusive?: boolean;
 }
 
 export interface TaxCalculationResult {
@@ -112,14 +127,30 @@ function sumBreakdown(breakdown: { label: string; amount: number }[]): number {
   return breakdown.reduce((acc, item) => acc + item.amount, 0);
 }
 
-export function calculateTax(input: TaxCalculationInput): TaxCalculationResult {
-  const { regime, revenue, expenses, customRate, customFixedAmount, vatableExpenses } = input;
+export type TaxConfig = Record<TaxRegimeType, TaxRegimeConfig>;
+
+export function calculateTax(
+  input: TaxCalculationInput,
+  customConfig?: Partial<Record<TaxRegimeType, Partial<TaxRegimeConfig>>>,
+): TaxCalculationResult {
+  const {
+    regime,
+    revenue,
+    expenses,
+    customRate,
+    customFixedAmount,
+    vatableExpenses,
+  } = input;
   const locale: Locale = input.locale ?? "uz";
-  const config = UZ_TAX_REGIMES[regime];
+  const baseConfig = UZ_TAX_REGIMES[regime];
+  const config: TaxRegimeConfig = customConfig?.[regime]
+    ? { ...baseConfig, ...customConfig[regime] }
+    : baseConfig;
   const regimeName = getRegimeCopy(regime, locale).name;
 
   if (regime === "turnover") {
-    const rate = customRate !== undefined ? customRate : config.defaultRatePercent || 4;
+    const rate =
+      customRate !== undefined ? customRate : config.defaultRatePercent || 4;
     const taxBase = Math.max(0, revenue);
 
     const breakdown = [
@@ -138,7 +169,8 @@ export function calculateTax(input: TaxCalculationInput): TaxCalculationResult {
       regimeName,
       taxBase: Math.round(taxBase),
       taxAmount,
-      effectiveTaxRate: revenue > 0 ? Math.round((taxAmount / revenue) * 1000) / 10 : 0,
+      effectiveTaxRate:
+        revenue > 0 ? Math.round((taxAmount / revenue) * 1000) / 10 : 0,
       profitAfterTax: Math.round(revenue - expenses - taxAmount),
       breakdown,
       isDemo: true,
@@ -157,76 +189,143 @@ export function calculateTax(input: TaxCalculationInput): TaxCalculationResult {
   }
 
   if (regime === "general") {
-    const profitTaxRate = customRate !== undefined ? customRate : config.profitTaxPercent || 15;
+    const profitTaxRate =
+      customRate !== undefined ? customRate : config.profitTaxPercent || 15;
     const vatRate = config.vatPercent || 12;
+    const isVatInclusive = input.isVatInclusive ?? true;
 
-    const profitBeforeTax = Math.max(0, revenue - expenses);
-    const profitTax = profitBeforeTax * (profitTaxRate / 100);
-
-    // QQS — qo'shilgan qiymatdan olinadi: chiqim QQSi minus kirim QQSi.
-    // (Ilgari bu noto'g'ri tarzda sof foydaning 12% i sifatida hisoblanardi.)
     const vatableCosts =
       vatableExpenses !== undefined
         ? Math.min(Math.max(0, vatableExpenses), Math.max(0, expenses))
         : Math.max(0, expenses) * DEFAULT_VATABLE_EXPENSE_RATIO;
-    const addedValue = Math.max(0, revenue - vatableCosts);
-    const netVat = addedValue * (vatRate / 100);
+
+    // QQS hisob-kitobi
+    let outputVat = 0;
+    let inputVat = 0;
+    let netVat = 0;
+    let netRevenue = revenue;
+    let netExpenses = expenses;
+    let profitBeforeTax = 0;
+
+    if (isVatInclusive) {
+      // Yalpi summa (kassadagi tushum ichida QQS bor): 12 / 112
+      outputVat = revenue * (vatRate / (100 + vatRate));
+      inputVat = vatableCosts * (vatRate / (100 + vatRate));
+      netVat = Math.max(0, outputVat - inputVat);
+      netRevenue = revenue - outputVat;
+      netExpenses = expenses - inputVat;
+      profitBeforeTax = netRevenue - netExpenses;
+    } else {
+      // QQSsiz summa (tushumga ustama sifatida 12%):
+      outputVat = revenue * (vatRate / 100);
+      inputVat = vatableCosts * (vatRate / 100);
+      netVat = Math.max(0, revenue - vatableCosts) * (vatRate / 100);
+      netRevenue = revenue;
+      netExpenses = expenses;
+      profitBeforeTax = netRevenue - netExpenses;
+    }
+
+    const taxBase = Math.max(0, profitBeforeTax);
+    const profitTax = taxBase * (profitTaxRate / 100);
 
     const breakdown =
       locale === "en"
         ? [
-            { label: `Profit tax (${profitTaxRate}%)`, amount: Math.round(profitTax) },
-            { label: `VAT — on value added (${vatRate}%)`, amount: Math.round(netVat) },
+            {
+              label: `Profit tax (${profitTaxRate}%)`,
+              amount: Math.round(profitTax),
+            },
+            {
+              label: isVatInclusive
+                ? `VAT — output minus input (${vatRate}/${100 + vatRate})`
+                : `VAT — on value added (${vatRate}%)`,
+              amount: Math.round(netVat),
+            },
           ]
         : [
-            { label: `Foyda solig‘i (${profitTaxRate}%)`, amount: Math.round(profitTax) },
-            { label: `QQS — qo‘shilgan qiymatdan (${vatRate}%)`, amount: Math.round(netVat) },
+            {
+              label: `Foyda solig‘i (${profitTaxRate}%)`,
+              amount: Math.round(profitTax),
+            },
+            {
+              label: isVatInclusive
+                ? `QQS — chiqim minus kirim (${vatRate}/${100 + vatRate})`
+                : `QQS — qo‘shilgan qiymatdan (${vatRate}%)`,
+              amount: Math.round(netVat),
+            },
           ];
     const taxAmount = sumBreakdown(breakdown);
+    const profitAfterTax = Math.round(profitBeforeTax - profitTax);
 
     return {
       regime,
       regimeName,
-      taxBase: Math.round(profitBeforeTax),
+      taxBase: Math.round(taxBase),
       taxAmount,
-      effectiveTaxRate: revenue > 0 ? Math.round((taxAmount / revenue) * 1000) / 10 : 0,
-      profitAfterTax: Math.round(revenue - expenses - taxAmount),
+      effectiveTaxRate:
+        revenue > 0 ? Math.round((taxAmount / revenue) * 1000) / 10 : 0,
+      profitAfterTax,
       breakdown,
       isDemo: true,
       disclaimer: DISCLAIMER[locale],
       assumptions:
         locale === "en"
           ? [
+              isVatInclusive
+                ? `VAT calculation: Revenue and expenses are assumed to be VAT-inclusive. Output VAT is computed as ${vatRate}/${
+                    100 + vatRate
+                  } of revenue (~${((vatRate / (100 + vatRate)) * 100).toFixed(1)}%).`
+                : `VAT calculation: Revenue and expenses are assumed to be VAT-exclusive (net). Output VAT is computed as ${vatRate}% of revenue.`,
               `VAT was computed as output VAT minus input VAT. ${Math.round(
-                (vatableCosts / Math.max(1, expenses)) * 100
+                (vatableCosts / Math.max(1, expenses)) * 100,
               )}% of expenses were assumed to carry input VAT.`,
               "Salaries and social payments carry no input VAT.",
-              "The profit-tax base is accounting profit with no tax-purpose adjustments.",
+              isVatInclusive
+                ? "The profit-tax base is accounting profit computed from net revenue and net expenses."
+                : "Because VAT is collected for the budget, it is not deducted as a business expense from net profit.",
             ]
           : [
+              isVatInclusive
+                ? `QQS hisobi: Tushum va xarajatlar yalpi (QQS ichida) deb olindi. Chiqim QQSi tushumning ${vatRate}/${
+                    100 + vatRate
+                  } qismi (~${((vatRate / (100 + vatRate)) * 100).toFixed(1)}%) sifatida hisoblandi.`
+                : `QQS hisobi: Tushum va xarajatlar QQSsiz (net) deb olindi. Chiqim QQSi tushumning ${vatRate}% i sifatida hisoblandi.`,
               `QQS chiqim QQSi minus kirim QQSi sifatida hisoblandi. Xarajatlarning ${Math.round(
-                (vatableCosts / Math.max(1, expenses)) * 100
+                (vatableCosts / Math.max(1, expenses)) * 100,
               )}% ida kirim QQSi bor deb olindi.`,
               "Ish haqi va ijtimoiy to‘lovlarda kirim QQSi bo‘lmaydi.",
-              "Foyda solig‘i bazasi soliq maqsadidagi tuzatishlarsiz, buxgalteriya foydasidan olindi.",
+              isVatInclusive
+                ? "Foyda solig‘i bazasi QQSsiz sof tushum va sof xarajatlar farqidan olindi."
+                : "QQS korxona xarajati hisoblanmagani uchun sof foydadan ayirilmaydi.",
             ],
     };
   }
 
   // individual — YaTT qat'iy belgilangan soliq
   const fixedAmount =
-    customFixedAmount !== undefined ? customFixedAmount : config.fixedMonthlyAmount || 500_000;
+    customFixedAmount !== undefined
+      ? customFixedAmount
+      : config.fixedMonthlyAmount || 500_000;
   const socialTax = config.socialTaxMonthlyAmount || 0;
 
   const breakdown =
     locale === "en"
       ? [
           { label: "Fixed monthly tax", amount: Math.round(fixedAmount) },
-          { label: "Social tax (base unit calculation)", amount: Math.round(socialTax) },
+          {
+            label: "Social tax (base unit calculation)",
+            amount: Math.round(socialTax),
+          },
         ]
       : [
-          { label: "Oylik qat'iy belgilangan soliq", amount: Math.round(fixedAmount) },
-          { label: "Ijtimoiy soliq (1 BHM bazaviy hisob)", amount: Math.round(socialTax) },
+          {
+            label: "Oylik qat'iy belgilangan soliq",
+            amount: Math.round(fixedAmount),
+          },
+          {
+            label: "Ijtimoiy soliq (1 BHM bazaviy hisob)",
+            amount: Math.round(socialTax),
+          },
         ];
   // Ilgari ijtimoiy soliq jadvalda ko'rsatilardi, lekin jamiga qo'shilmasdi —
   // sahifada 500 000 + 375 000 chiqib, jami 500 000 deb yozilardi.
@@ -237,7 +336,8 @@ export function calculateTax(input: TaxCalculationInput): TaxCalculationResult {
     regimeName,
     taxBase: Math.round(revenue),
     taxAmount,
-    effectiveTaxRate: revenue > 0 ? Math.round((taxAmount / revenue) * 1000) / 10 : 0,
+    effectiveTaxRate:
+      revenue > 0 ? Math.round((taxAmount / revenue) * 1000) / 10 : 0,
     profitAfterTax: Math.round(revenue - expenses - taxAmount),
     breakdown,
     isDemo: true,

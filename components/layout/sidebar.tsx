@@ -35,7 +35,7 @@ export const NAV_ITEMS = [
 
 export function Sidebar({ onCloseMobile }: { onCloseMobile?: () => void }) {
   const pathname = usePathname();
-  const { business, resetToDemo } = useBusiness();
+  const { business, resetToDemo, role, setRole, loadPreset, presets } = useBusiness();
   const { t } = useLanguage();
 
   return (
@@ -137,22 +137,86 @@ export function Sidebar({ onCloseMobile }: { onCloseMobile?: () => void }) {
           <span>{t.sidebar.guaranteeBadge}</span>
         </div>
         <LanguageToggle className="w-full" />
-        <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="h-8 w-8 rounded-full bg-slate-200 flex items-center justify-center text-xs font-bold text-slate-700">
-              DT
-            </div>
-            <div className="flex flex-col">
-              <span className="text-xs font-bold text-slate-900">{t.sidebar.demoUser}</span>
-              <span className="text-[10px] text-slate-400">{t.sidebar.demoEmail}</span>
-            </div>
+
+        {/* Specialist Role Picker */}
+        <div className="pt-2 border-t border-slate-100 space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] uppercase tracking-wider font-bold text-slate-400">
+              {t.sidebar.roles.title}
+            </span>
+            <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
+              {t.sidebar.roles[role]}
+            </span>
           </div>
-          <Link
-            href="/"
-            className="text-[11px] font-medium text-slate-400 hover:text-emerald-600 transition-colors"
-          >
-            {t.sidebar.logout}
-          </Link>
+
+          <div className="grid grid-cols-2 gap-1 bg-slate-100 p-1 rounded-xl">
+            {(["entrepreneur", "accountant", "banker", "consultant"] as const).map((r) => (
+              <button
+                key={r}
+                onClick={() => setRole(r)}
+                className={cn(
+                  "px-2 py-1.5 rounded-lg text-[11px] font-medium transition-all text-center flex items-center justify-center gap-1",
+                  role === r
+                    ? "bg-white text-slate-900 shadow-xs font-bold"
+                    : "text-slate-600 hover:text-slate-900"
+                )}
+                title={t.sidebar.roles[`${r}Sub`]}
+              >
+                <span>{r === "entrepreneur" ? "🧑‍💼" : r === "accountant" ? "📊" : r === "banker" ? "🏦" : "💼"}</span>
+                <span>{t.sidebar.roles[r]}</span>
+              </button>
+            ))}
+          </div>
+
+          {/* Consultant Mode: Multi-Client Quick Selector */}
+          {role === "consultant" && (
+            <div className="rounded-xl border border-blue-200 bg-blue-50/60 p-2 space-y-1.5 animate-fade-in">
+              <span className="text-[10px] font-bold text-blue-900 uppercase tracking-wider block">
+                {t.sidebar.roles.clientProfiles}
+              </span>
+              <div className="space-y-1">
+                {presets.map((p) => {
+                  const isCurrent = business.name === p.name;
+                  return (
+                    <button
+                      key={p.id}
+                      onClick={() => loadPreset(p.id)}
+                      className={cn(
+                        "w-full text-left px-2 py-1 rounded-md text-[11px] transition-colors flex items-center justify-between",
+                        isCurrent
+                          ? "bg-blue-600 text-white font-semibold"
+                          : "text-blue-950 hover:bg-blue-100/80"
+                      )}
+                    >
+                      <span className="truncate">{p.name}</span>
+                      {isCurrent && <span className="text-[9px]">●</span>}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          <div className="pt-1 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="h-8 w-8 rounded-full bg-slate-200 flex items-center justify-center text-xs font-bold text-slate-700">
+                {role === "entrepreneur" && "DT"}
+                {role === "accountant" && "BX"}
+                {role === "banker" && "BK"}
+                {role === "consultant" && "KS"}
+              </div>
+              <div className="flex flex-col">
+                <span className="text-xs font-bold text-slate-900">{t.sidebar.demoUser}</span>
+                <span className="text-[10px] text-slate-400">{t.sidebar.roles[`${role}Sub`]}</span>
+              </div>
+            </div>
+            <Link
+              href="/"
+              className="text-[11px] font-medium text-slate-400 hover:text-emerald-600 transition-colors"
+            >
+              {t.sidebar.logout}
+            </Link>
+          </div>
         </div>
       </div>
     </aside>

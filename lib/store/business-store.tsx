@@ -56,8 +56,70 @@ const BusinessSchema = z
   })
   .partial();
 
+export type UserRole = "entrepreneur" | "accountant" | "banker" | "consultant";
+
+export interface BusinessProfilePreset {
+  id: string;
+  name: string;
+  type: string;
+  location: string;
+  business: BusinessState;
+}
+
+export const PRESET_PROFILES: BusinessProfilePreset[] = [
+  {
+    id: "urganch-fast-food",
+    name: "Fast Food Urganch",
+    type: "Fast Food",
+    location: "Urganch",
+    business: DEFAULT_DEMO_BUSINESS,
+  },
+  {
+    id: "toshkent-coffee",
+    name: "Coffee House Tashkent",
+    type: "Kofexona",
+    location: "Toshkent (Chilonzor)",
+    business: {
+      name: "Coffee House Tashkent",
+      type: "Kofexona",
+      location: "Toshkent (Chilonzor)",
+      initialCapital: 150_000_000,
+      monthlyRevenue: 60_000_000,
+      monthlyExpenses: 38_000_000,
+      potentialLoan: 80_000_000,
+      loanRate: 22,
+      loanMonths: 36,
+      employees: 5,
+      targetCustomer: "Ofis xodimlari va talabalar",
+      isDemo: true,
+    },
+  },
+  {
+    id: "samarqand-retail",
+    name: "Samarqand Tekstil & Retail",
+    type: "Chakana savdo",
+    location: "Samarqand (Registon)",
+    business: {
+      name: "Samarqand Tekstil & Retail",
+      type: "Chakana savdo",
+      location: "Samarqand (Registon)",
+      initialCapital: 80_000_000,
+      monthlyRevenue: 35_000_000,
+      monthlyExpenses: 22_000_000,
+      potentialLoan: 40_000_000,
+      loanRate: 24,
+      loanMonths: 24,
+      employees: 3,
+      targetCustomer: "Shahar aholisi va sayyohlar",
+      isDemo: true,
+    },
+  },
+];
+
 const STORAGE_KEY_BUSINESS = "bussy_business_data";
 const STORAGE_KEY_PLAN = "bussy_saved_plan";
+const STORAGE_KEY_ROLE = "bussy_user_role";
+const DEFAULT_USER_ROLE: UserRole = "entrepreneur";
 
 /* ============================================================
    TASHQI STORE
@@ -69,6 +131,7 @@ const STORAGE_KEY_PLAN = "bussy_saved_plan";
 
 let businessState: BusinessState = DEFAULT_DEMO_BUSINESS;
 let planState: BusinessPlanData | null = null;
+let userRole: UserRole = DEFAULT_USER_ROLE;
 let loadedFromStorage = false;
 /**
  * Har bir ANIQ yozuvda (updateBusiness / resetToDemo) oshadi.
@@ -105,6 +168,15 @@ function loadFromStorage() {
   } catch (e) {
     console.warn("Bussy: saqlangan rejani o'qib bo'lmadi", e);
   }
+
+  try {
+    const storedRole = window.localStorage.getItem(STORAGE_KEY_ROLE);
+    if (storedRole && ["entrepreneur", "accountant", "banker", "consultant"].includes(storedRole)) {
+      userRole = storedRole as UserRole;
+    }
+  } catch (e) {
+    console.warn("Bussy: rolni o'qib bo'lmadi", e);
+  }
 }
 
 /**
@@ -119,7 +191,11 @@ function attachStorageListener() {
   storageListenerAttached = true;
 
   window.addEventListener("storage", (event: StorageEvent) => {
-    if (event.key === STORAGE_KEY_BUSINESS || event.key === STORAGE_KEY_PLAN) {
+    if (
+      event.key === STORAGE_KEY_BUSINESS ||
+      event.key === STORAGE_KEY_PLAN ||
+      event.key === STORAGE_KEY_ROLE
+    ) {
       loadedFromStorage = false;
       loadFromStorage();
       storeRevision += 1;
@@ -139,6 +215,14 @@ function subscribe(listener: () => void) {
 
 function getBusinessSnapshot(): BusinessState {
   return businessState;
+}
+
+function getRoleSnapshot(): UserRole {
+  return userRole;
+}
+
+function getRoleServerSnapshot(): UserRole {
+  return DEFAULT_USER_ROLE;
 }
 
 function getRevisionSnapshot(): number {
@@ -179,6 +263,10 @@ interface BusinessContextType {
   resetToDemo: () => void;
   savedBusinessPlan: BusinessPlanData | null;
   saveBusinessPlan: (plan: BusinessPlanData) => void;
+  role: UserRole;
+  setRole: (role: UserRole) => void;
+  loadPreset: (presetId: string) => void;
+  presets: BusinessProfilePreset[];
   /** Klientda localStorage o'qilganidan keyin `true`. */
   hydrated: boolean;
 }
@@ -196,6 +284,11 @@ export function BusinessProvider({ children }: { children: React.ReactNode }) {
     getPlanSnapshot,
     getPlanServerSnapshot
   );
+  const role = useSyncExternalStore(
+    subscribe,
+    getRoleSnapshot,
+    getRoleServerSnapshot
+  );
   const hydrated = useSyncExternalStore(
     subscribe,
     () => true,
@@ -209,10 +302,28 @@ export function BusinessProvider({ children }: { children: React.ReactNode }) {
     emit();
   }, []);
 
+  const setRole = useCallback((newRole: UserRole) => {
+    userRole = newRole;
+    persist(STORAGE_KEY_ROLE, newRole);
+    emit();
+  }, []);
+
+  const loadPreset = useCallback((presetId: string) => {
+    const found = PRESET_PROFILES.find((p) => p.id === presetId);
+    if (found) {
+      businessState = { ...found.business, isDemo: false };
+      storeRevision += 1;
+      persist(STORAGE_KEY_BUSINESS, businessState);
+      emit();
+    }
+  }, []);
+
   const resetToDemo = useCallback(() => {
     businessState = DEFAULT_DEMO_BUSINESS;
+    userRole = DEFAULT_USER_ROLE;
     storeRevision += 1;
     persist(STORAGE_KEY_BUSINESS, businessState);
+    persist(STORAGE_KEY_ROLE, userRole);
     emit();
   }, []);
 
@@ -230,12 +341,42 @@ export function BusinessProvider({ children }: { children: React.ReactNode }) {
         resetToDemo,
         savedBusinessPlan,
         saveBusinessPlan,
+        role,
+        setRole,
+        loadPreset,
+        presets: PRESET_PROFILES,
         hydrated,
       }}
     >
       {children}
     </BusinessContext.Provider>
   );
+}
+
+export function _getBusinessStoreSnapshotForTest() {
+  return {
+    business: businessState,
+    role: userRole,
+    revision: storeRevision,
+  };
+}
+
+export function _setBusinessStoreRoleForTest(r: UserRole) {
+  userRole = r;
+}
+
+export function _loadBusinessPresetForTest(id: string) {
+  const found = PRESET_PROFILES.find((p) => p.id === id);
+  if (found) {
+    businessState = { ...found.business, isDemo: false };
+    storeRevision += 1;
+  }
+}
+
+export function _resetBusinessStoreForTest() {
+  businessState = DEFAULT_DEMO_BUSINESS;
+  userRole = DEFAULT_USER_ROLE;
+  storeRevision = 0;
 }
 
 export function useBusiness() {

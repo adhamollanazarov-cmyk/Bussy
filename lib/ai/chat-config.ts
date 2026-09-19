@@ -60,7 +60,6 @@ export function trimConversation(messages: ChatMessage[]): ChatMessage[] {
 
   // Suhbat foydalanuvchi xabaridan boshlanishi mantiqiyroq
   while (kept.length > 1 && kept[0].role === "assistant") {
-    total -= kept[0].content.length;
     kept.shift();
   }
 

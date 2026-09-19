@@ -43,6 +43,12 @@ export interface ChatResponsePayload {
    1. RAQAMLARNI AJRATIB OLISH
    ============================================================ */
 
+export interface AmountSpan {
+  amount: number;
+  start: number;
+  end: number;
+}
+
 export interface ExtractedNumbers {
   /** Pul summalari (so'mda), matnda uchrash tartibida. */
   amounts: number[];
@@ -50,6 +56,8 @@ export interface ExtractedNumbers {
   rate: number | null;
   /** Muddat (oylarda). */
   months: number | null;
+  /** Matndagi joylashuvi. */
+  spans?: AmountSpan[];
 }
 
 const MULTIPLIERS: Record<string, number> = {
@@ -59,6 +67,7 @@ const MULTIPLIERS: Record<string, number> = {
   bln: 1_000_000_000,
   mln: 1_000_000,
   million: 1_000_000,
+  m: 1_000_000,
   ming: 1_000,
   thousand: 1_000,
   k: 1_000,
@@ -71,7 +80,7 @@ const MULTIPLIERS: Record<string, number> = {
  * shunda inglizcha "50 million UZS" ham to'g'ri o'qiladi.
  */
 const TOKEN_RE =
-  /(\d{1,3}(?:[\s  ]\d{3})+|\d+(?:[.,]\d+)?)\s*(mlrd|milliard|billion|bln|mln|million|ming|thousand|k|foiz|percent|%|oylik|oyga|oyda|months?|mo|oy|yillik|yilga|years?|yil)?/gi;
+  /(\d{1,3}(?:[\s  ]\d{3})+|\d+(?:[.,]\d+)?)\s*(mlrd|milliard|billion|bln|mln|million|ming|thousand|k|foiz|percent|%|oylik|oyga|oyda|months?|mo|oy|yillik|yilga|years?|yil|m\b)?/gi;
 
 /**
  * Matndan summa, foiz va muddatni ajratib oladi.
@@ -84,12 +93,15 @@ export function extractNumbers(text: string): ExtractedNumbers {
   const normalized = text.toLowerCase().replace(/[  ]/g, " ");
 
   const amounts: number[] = [];
+  const spans: AmountSpan[] = [];
   let rate: number | null = null;
   let months: number | null = null;
 
   for (const match of normalized.matchAll(TOKEN_RE)) {
     const rawNumber = match[1];
     const suffix = (match[2] || "").toLowerCase();
+    const matchStart = match.index ?? 0;
+    const matchEnd = matchStart + match[0].length;
 
     const isGrouped = /[\s  ]/.test(rawNumber);
     // Guruhlangan raqamda vergul/nuqta ajratuvchi emas; aks holda "1,5" = 1.5
@@ -104,7 +116,11 @@ export function extractNumbers(text: string): ExtractedNumbers {
       continue;
     }
 
-    if (suffix.startsWith("oy") || suffix === "mo" || suffix.startsWith("month")) {
+    if (
+      suffix.startsWith("oy") ||
+      suffix === "mo" ||
+      suffix.startsWith("month")
+    ) {
       if (months === null) months = Math.round(numeric);
       continue;
     }
@@ -116,18 +132,22 @@ export function extractNumbers(text: string): ExtractedNumbers {
 
     const multiplier = MULTIPLIERS[suffix];
     if (multiplier) {
-      amounts.push(Math.round(numeric * multiplier));
+      const val = Math.round(numeric * multiplier);
+      amounts.push(val);
+      spans.push({ amount: val, start: matchStart, end: matchEnd });
       continue;
     }
 
     // Qo'shimchasiz raqam: faqat guruhlangan yoki yetarlicha katta bo'lsa
     // summa deb qabul qilamiz ("24" — bu summa emas, ehtimol muddat yoki foiz).
     if (isGrouped || numeric >= 10_000) {
-      amounts.push(Math.round(numeric));
+      const val = Math.round(numeric);
+      amounts.push(val);
+      spans.push({ amount: val, start: matchStart, end: matchEnd });
     }
   }
 
-  return { amounts, rate, months };
+  return { amounts, rate, months, spans };
 }
 
 /* ============================================================
@@ -150,32 +170,38 @@ const INTENT_RULES: { intent: Intent; test: (t: string) => boolean }[] = [
   {
     intent: "DEMO_SCENARIO",
     test: (t) =>
-      (/urganch/.test(t) && /fast\s*food/.test(t) && /reja|moliyaviy|model|plan|financial/.test(t)) ||
+      (/urganch/.test(t) &&
+        /fast\s*food/.test(t) &&
+        /reja|moliyaviy|model|plan|financial/.test(t)) ||
       /demo\s*(rejim|ssenariy|scenario)/.test(t),
   },
   {
     intent: "TAX_CALCULATION",
-    test: (t) => /soliq|qqs|yatt|aylanmadan|soliqlar|\btax\b|vat\b/.test(t),
+    test: (t) => /soliq|qqs|yatt|aylanmadan|soliqlar|\btax\b|\bvat\b/.test(t),
   },
   {
     // Kredit so'zidan OLDIN tekshiriladi.
     intent: "DEBT_BURDEN",
     test: (t) =>
       /ko‘tar|ko'tar|kotar|qarz yuki|debt burden|to‘lay olaman|tola olaman|can (i|we) (afford|carry)|afford (this|the) loan/.test(
-        t
+        t,
       ),
   },
   {
     intent: "BUSINESS_PLAN",
     test: (t) =>
-      /biznes-reja|biznes reja|reja tuz|reja tayyorla|business\s*plan|bo‘limli reja/.test(t),
+      /biznes-reja|biznes reja|reja tuz|reja tayyorla|business\s*plan|bo‘limli reja/.test(
+        t,
+      ),
   },
   {
     // 2-bosqichli agent zanjiri (Kredit -> Zararsizlik)
     // Kredit va umumiy zararsizlikdan oldin tekshiriladi
     intent: "CHAINED_LOAN_BREAK_EVEN",
     test: (t) =>
-      /(kredit|qarz|loan|debt).*(qopla|nechta|sotish|sotay|cover|pay)/.test(t) ||
+      /(kredit|qarz|loan|debt).*(qopla|nechta|sotish|sotay|cover|pay)/.test(
+        t,
+      ) ||
       /(qopla|cover|pay).*(kredit|qarz|loan|debt)/.test(t) ||
       /how many.*(cover|pay).*loan/.test(t) ||
       /nechta.*kredit/.test(t),
@@ -186,11 +212,13 @@ const INTENT_RULES: { intent: Intent; test: (t: string) => boolean }[] = [
   },
   {
     intent: "LOAN_CALCULATION",
-    test: (t) => /kredit|qarz|foiz stavka|annuitet|\bloan\b|\bcredit\b|annuity/.test(t),
+    test: (t) =>
+      /kredit|qarz|foiz stavka|annuitet|\bloan\b|\bcredit\b|annuity/.test(t),
   },
   {
     intent: "PROFIT_CALCULATION",
-    test: (t) => /foyda|marja|rentabellik|daromad|\bprofit\b|\bmargin\b/.test(t),
+    test: (t) =>
+      /foyda|marja|rentabellik|daromad|\bprofit\b|\bmargin\b/.test(t),
   },
   {
     intent: "CASHFLOW",
@@ -199,7 +227,9 @@ const INTENT_RULES: { intent: Intent; test: (t: string) => boolean }[] = [
   {
     intent: "BUSINESS_IDEA_ANALYSIS",
     test: (t) =>
-      /bozor|g‘oya|g'oya|goya|boshla|ochmoqchi|ochish|\bmarket\b|\bidea\b|\bopen\b|\bstart\b/.test(t),
+      /bozor|g‘oya|g'oya|goya|boshla|ochmoqchi|ochish|\bmarket\b|\bidea\b|\bopen\b|\bstart\b/.test(
+        t,
+      ),
   },
 ];
 
@@ -229,7 +259,7 @@ function askFor(
   locale: Locale,
   what: string,
   example: string,
-  quickActions?: ChatResponsePayload["quickActions"]
+  quickActions?: ChatResponsePayload["quickActions"],
 ): ChatResponsePayload {
   const content =
     locale === "en"
@@ -250,14 +280,15 @@ Shunda men taxmin qilmasdan, aynan sizning raqamlaringiz bo‘yicha hisoblab ber
     role: "assistant",
     intent: "CLARIFICATION",
     content,
-    quickActions:
-      quickActions ||
-      [
-        {
-          label: locale === "en" ? "📊 Send an example request" : "📊 Misol so‘rovni yuborish",
-          prompt: example,
-        },
-      ],
+    quickActions: quickActions || [
+      {
+        label:
+          locale === "en"
+            ? "📊 Send an example request"
+            : "📊 Misol so‘rovni yuborish",
+        prompt: example,
+      },
+    ],
   };
 }
 
@@ -267,10 +298,10 @@ Shunda men taxmin qilmasdan, aynan sizning raqamlaringiz bo‘yicha hisoblab ber
 
 export function processWithSmartDemoEngine(
   userMessage: string,
-  locale: Locale = "uz"
+  locale: Locale = "uz",
 ): ChatResponsePayload {
   const text = userMessage.toLowerCase().trim();
-  const { amounts, rate, months } = extractNumbers(text);
+  const { amounts, rate, months, spans } = extractNumbers(text);
   const intent = detectIntent(text);
 
   let response: ChatResponsePayload;
@@ -279,13 +310,19 @@ export function processWithSmartDemoEngine(
       response = handleDemoScenario(locale);
       break;
     case "CHAINED_LOAN_BREAK_EVEN":
-      response = handleChainedLoanBreakEven(amounts, rate, months, locale);
+      response = handleChainedLoanBreakEven(
+        text,
+        amounts,
+        rate,
+        months,
+        locale,
+      );
       break;
     case "TAX_CALCULATION":
       response = handleTax(text, amounts, rate, locale);
       break;
     case "DEBT_BURDEN":
-      response = handleDebtBurden(amounts, rate, months, locale);
+      response = handleDebtBurden(text, amounts, rate, months, locale, spans);
       break;
     case "BUSINESS_PLAN":
       response = handleBusinessPlan(text, amounts, locale);
@@ -311,7 +348,9 @@ export function processWithSmartDemoEngine(
   }
 
   if (!response.steps && response.toolCalled && response.toolResult) {
-    response.steps = [{ tool: response.toolCalled, result: response.toolResult }];
+    response.steps = [
+      { tool: response.toolCalled, result: response.toolResult },
+    ];
   }
 
   return response;
@@ -331,7 +370,11 @@ function handleDemoScenario(locale: Locale): ChatResponsePayload {
   const fixedCost = Math.round(monthlyExpenses * COST_SPLIT.fixed);
   const variableCost = Math.round(monthlyExpenses * COST_SPLIT.variable);
 
-  const loanRes = calculateLoan({ amount: loanAmount, annualRate, months: loanMonths });
+  const loanRes = calculateLoan({
+    amount: loanAmount,
+    annualRate,
+    months: loanMonths,
+  });
   const profitRes = calculateProfit({
     revenue: expectedRevenue,
     fixedCost,
@@ -385,7 +428,10 @@ ${DISCLAIMER.uz}`;
     intent: "DEMO_SCENARIO",
     toolCalled: "financial_model_pipeline",
     toolResult: {
-      modelName: locale === "en" ? "Initial financial model" : "Dastlabki moliyaviy model",
+      modelName:
+        locale === "en"
+          ? "Initial financial model"
+          : "Dastlabki moliyaviy model",
       businessType: "Fast Food",
       location: "Urganch",
       capital,
@@ -412,7 +458,8 @@ ${DISCLAIMER.uz}`;
         ? [
             {
               label: "⚡ How many to cover the loan? (2-step chain)",
-              prompt: "How many units do I need to sell per day to cover the loan?",
+              prompt:
+                "How many units do I need to sell per day to cover the loan?",
             },
             { label: "🎛️ Go to the what-if simulator", href: "/app/simulator" },
             { label: "📄 Build a business plan", href: "/app/business-plan" },
@@ -423,7 +470,10 @@ ${DISCLAIMER.uz}`;
               label: "⚡ Kreditni qoplash uchun kuniga nechta sotish kerak?",
               prompt: "Kreditni qoplash uchun kuniga nechta sotishim kerak?",
             },
-            { label: "🎛️ What-if simulyatoriga o‘tish", href: "/app/simulator" },
+            {
+              label: "🎛️ What-if simulyatoriga o‘tish",
+              href: "/app/simulator",
+            },
             { label: "📄 Biznes-reja yaratish", href: "/app/business-plan" },
             { label: "💳 Kreditni batafsil hisoblash", href: "/app/loan" },
           ],
@@ -433,28 +483,91 @@ ${DISCLAIMER.uz}`;
 /* ---------- 2-bosqichli zanjir (Agent Chaining): Kredit -> Zararsizlik ---------- */
 
 function handleChainedLoanBreakEven(
+  text: string,
   amounts: number[],
   rate: number | null,
   months: number | null,
-  locale: Locale
+  locale: Locale,
 ): ChatResponsePayload {
-  const loanAmount = amounts[0] && amounts[0] >= 1_000_000 ? amounts[0] : 50_000_000;
+  let loanAmount = 50_000_000;
+  let baselineFixedCost = 15_400_000;
+  let hasExplicitLoan = false;
+  let hasExplicitFixedCost = false;
+
+  if (amounts.length >= 2) {
+    const costPos = text.search(/xarajat|ijara|fixed|operat/i);
+    const loanPos = text.search(/kredit|loan/i);
+    if (costPos !== -1 && (loanPos === -1 || costPos < loanPos)) {
+      baselineFixedCost = amounts[0];
+      loanAmount = amounts[1];
+    } else {
+      loanAmount = amounts[0];
+      baselineFixedCost = amounts[1];
+    }
+    hasExplicitLoan = true;
+    hasExplicitFixedCost = true;
+  } else if (amounts.length === 1 && amounts[0] >= 1_000_000) {
+    const costPos = text.search(/xarajat|ijara|fixed|operat/i);
+    const costMatch =
+      /(?:xarajat|ijara|fixed|operat)[^\d]{0,20}\d+|\d+[^\w]{0,10}(?:mln|million|ming|k)?[^\w]{0,10}(?:xarajat|ijara|fixed|operat)/i.test(
+        text,
+      );
+    if (costPos !== -1 && costMatch) {
+      baselineFixedCost = amounts[0];
+      hasExplicitFixedCost = true;
+    } else {
+      loanAmount = amounts[0];
+      hasExplicitLoan = true;
+    }
+  }
+
   const annualRate = rate ?? 24;
   const loanMonths = months ?? 24;
 
+  const assumedParts: string[] = [];
+  if (!hasExplicitLoan) {
+    assumedParts.push(
+      locale === "en"
+        ? `loan amount ${formatMoney(loanAmount)}`
+        : `kredit summasi ${formatMoney(loanAmount)}`,
+    );
+  }
+  if (rate === null) {
+    assumedParts.push(
+      locale === "en"
+        ? `annual rate ${annualRate}%`
+        : `yillik foiz ${annualRate}%`,
+    );
+  }
+  if (months === null) {
+    assumedParts.push(
+      locale === "en" ? `term ${loanMonths} months` : `muddat ${loanMonths} oy`,
+    );
+  }
+  if (!hasExplicitFixedCost) {
+    assumedParts.push(
+      locale === "en"
+        ? `operating fixed costs ${formatMoney(baselineFixedCost)}/mo (demo baseline)`
+        : `oylik o‘zgarmas xarajat ${formatMoney(baselineFixedCost)} (demo bazaviy)`,
+    );
+  }
+
   // 1-bosqich: Kredit hisobi
-  const loanRes = calculateLoan({ amount: loanAmount, annualRate, months: loanMonths });
+  const loanRes = calculateLoan({
+    amount: loanAmount,
+    annualRate,
+    months: loanMonths,
+  });
 
   // 2-bosqich: Birlik iqtisodiyoti va zararsizlik
-  const unit = resolveUnitEconomics("fast food", locale);
+  const unit = resolveUnitEconomics(text, locale);
   const unitMargin = unit.sellingPrice - unit.variableCostPerUnit;
 
   // Faqat kredit to'lovini qoplash uchun talab qilinadigan hajm
   const loanUnitsNeeded = Math.ceil(loanRes.monthlyPayment / unitMargin);
   const loanDailyUnitsNeeded = Math.ceil(loanUnitsNeeded / 30);
 
-  // Bazaviy o'zgarmas xarajat (Urganch Fast Food demo baseline: 28M x 0.55 = 15.4M) + kredit to'lovi
-  const baselineFixedCost = 15_400_000;
+  // Bazaviy o'zgarmas xarajat + kredit to'lovi
   const totalFixedCostWithLoan = baselineFixedCost + loanRes.monthlyPayment;
 
   const breakEvenRes = calculateBreakEven({
@@ -472,10 +585,16 @@ function handleChainedLoanBreakEven(
 - **Monthly annuity payment**: **${formatMoney(loanRes.monthlyPayment)}/mo**
 
 ### 2️⃣ Step 2: Break-even sales volume (\`calculate_break_even\`)
-Fast Food unit economics (${unit.unitLabel} price: ${formatMoney(unit.sellingPrice)}, variable cost: ${formatMoney(unit.variableCostPerUnit)}, unit margin: **${formatMoney(unitMargin)}**):
+${unit.displayName} unit economics (${unit.unitLabel} price: ${formatMoney(unit.sellingPrice)}, variable cost: ${formatMoney(unit.variableCostPerUnit)}, unit margin: **${formatMoney(unitMargin)}**):
 - **To cover the loan payment alone**: you must sell at least **${loanUnitsNeeded.toLocaleString("en-US")} ${unit.unitLabel}s/month** (~**${loanDailyUnitsNeeded} per day**).
 - **To cover all operating fixed costs + loan**: you need **${breakEvenRes.breakEvenUnits.toLocaleString("en-US")} ${unit.unitLabel}s/month** (~**${breakEvenRes.dailyUnits} per day**).
-
+${
+  assumedParts.length > 0
+    ? `\n⚠️ These weren't in your request, so they were assumed: ${assumedParts.join(
+        ", ",
+      )}. Send exact numbers and I'll recalculate.`
+    : ""
+}
 ### 💡 Bussy's conclusion:
 Servicing this loan requires selling only an additional **${loanDailyUnitsNeeded} ${unit.unitLabel}s per day**. Every unit sold beyond ~${breakEvenRes.dailyUnits}/day directly becomes your **net profit**.
 
@@ -487,10 +606,16 @@ ${DISCLAIMER.en}`
 - **Oylik annuitet to‘lov**: **${formatMoney(loanRes.monthlyPayment)}/oy**
 
 ### 2️⃣ 2-bosqich: Zararsizlik nuqtasini hisoblash (\`calculate_break_even\`)
-Fast Food birlik iqtisodiyoti (${unit.unitLabel} narxi: ${formatMoney(unit.sellingPrice)}, tannarxi: ${formatMoney(unit.variableCostPerUnit)}, 1 ta mahsulot sof marjasi: **${formatMoney(unitMargin)}**):
+${unit.displayName} birlik iqtisodiyoti (${unit.unitLabel} narxi: ${formatMoney(unit.sellingPrice)}, tannarxi: ${formatMoney(unit.variableCostPerUnit)}, 1 ta mahsulot sof marjasi: **${formatMoney(unitMargin)}**):
 - **Faqat kredit to‘lovini qoplash uchun**: oyiga kamida **${loanUnitsNeeded.toLocaleString("ru-RU")} ta** (kuniga **${loanDailyUnitsNeeded} ta**) ${unit.unitLabel} sotish kerak.
 - **Barcha o‘zgarmas xarajatlar + kredit to‘lovini to‘liq qoplash uchun**: oyiga jami **${breakEvenRes.breakEvenUnits.toLocaleString("ru-RU")} ta** (kuniga o‘rtacha **${breakEvenRes.dailyUnits} ta**) sotishingiz talab etiladi.
-
+${
+  assumedParts.length > 0
+    ? `\n⚠️ So‘rovingizda ko‘rsatilmagani uchun quyidagilar taxminan olindi: ${assumedParts.join(
+        ", ",
+      )}. Aniq raqamlarni yozsangiz, qayta hisoblab beraman.`
+    : ""
+}
 ### 💡 Bussy xulosasi:
 Kredit yuki biznesingizdan kuniga qo‘shimcha atigi **${loanDailyUnitsNeeded} ta** mijozga xizmat ko‘rsatishni talab qiladi. Kuniga ${breakEvenRes.dailyUnits} tadan ortiq sotilgan har bir ${unit.unitLabel} esa to‘g‘ridan-to‘g‘ri sizning **sof foydangizga** aylanadi.
 
@@ -516,12 +641,21 @@ ${DISCLAIMER.uz}`;
       locale === "en"
         ? [
             { label: "🎛️ Test what-if simulator", href: "/app/simulator" },
-            { label: "📄 Build 11-section business plan", href: "/app/business-plan" },
+            {
+              label: "📄 Build 11-section business plan",
+              href: "/app/business-plan",
+            },
             { label: "💳 View full loan schedule", href: "/app/loan" },
           ]
         : [
-            { label: "🎛️ What-if simulyatorini sinash", href: "/app/simulator" },
-            { label: "📄 11 bo‘limli biznes-reja tuzish", href: "/app/business-plan" },
+            {
+              label: "🎛️ What-if simulyatorini sinash",
+              href: "/app/simulator",
+            },
+            {
+              label: "📄 11 bo‘limli biznes-reja tuzish",
+              href: "/app/business-plan",
+            },
             { label: "💳 To‘liq kredit jadvali", href: "/app/loan" },
           ],
   };
@@ -533,7 +667,7 @@ function handleTax(
   text: string,
   amounts: number[],
   rate: number | null,
-  locale: Locale
+  locale: Locale,
 ): ChatResponsePayload {
   if (amounts.length === 0) {
     return askFor(
@@ -541,7 +675,7 @@ function handleTax(
       locale === "en" ? "the monthly revenue amount" : "oylik tushum summasi",
       locale === "en"
         ? "My monthly revenue is 45M UZS and expenses are 28M UZS. How much is the turnover tax?"
-        : "Oylik tushumim 45 mln so‘m, xarajatim 28 mln so‘m. Aylanma soliq qancha bo‘ladi?"
+        : "Oylik tushumim 45 mln so‘m, xarajatim 28 mln so‘m. Aylanma soliq qancha bo‘ladi?",
     );
   }
 
@@ -551,8 +685,8 @@ function handleTax(
   const regime = /yatt|yakka tartib/.test(text)
     ? ("individual" as const)
     : /qqs|umumiy soliq|foyda solig|\bvat\b|general regime/.test(text)
-    ? ("general" as const)
-    : ("turnover" as const);
+      ? ("general" as const)
+      : ("turnover" as const);
 
   const taxRes = calculateTax({
     regime,
@@ -576,7 +710,7 @@ ${expenses > 0 ? `- **Monthly expenses**: ${formatMoney(expenses)}\n` : ""}- **T
 ### 🧾 Tax line items:
 ${breakdownLines}
 - **Total tax burden**: **${formatMoney(taxRes.taxAmount)}** (effective rate: ${formatPercent(
-          taxRes.effectiveTaxRate
+          taxRes.effectiveTaxRate,
         )})
 ${expenses > 0 ? `- **Net profit after tax**: **${formatMoney(taxRes.profitAfterTax)}**` : ""}
 
@@ -592,7 +726,7 @@ ${expenses > 0 ? `- **Oylik xarajat**: ${formatMoney(expenses)}\n` : ""}- **Soli
 ### 🧾 Soliq moddalari:
 ${breakdownLines}
 - **Jami soliq yuki**: **${formatMoney(taxRes.taxAmount)}** (effektiv yuklama: ${formatPercent(
-          taxRes.effectiveTaxRate
+          taxRes.effectiveTaxRate,
         )})
 ${expenses > 0 ? `- **Soliqdan keyingi sof foyda**: **${formatMoney(taxRes.profitAfterTax)}**` : ""}
 
@@ -622,11 +756,170 @@ ${taxRes.disclaimer}`;
 
 /* ---------- Qarz yuki ---------- */
 
+export interface DebtBurdenResolvedAmounts {
+  rev?: number;
+  exp?: number;
+  loanAmt?: number;
+  missing?: "revenue" | "expenses" | "loan";
+}
+
+const DEBT_BURDEN_KEYWORDS = {
+  loan: /(?:kredit\w*|qarz\w*(?![\s-]yuki)|кредит\w*|за[её]м\w*|долг\w*(?![\s-]нагруз)|\bloan\w*(?![\s-]burden)|\bdebt\w*(?![\s-]burden)|\bborrow\w*)/gi,
+  rev: /(?:tushum\w*|daromad\w*|kassa\w*|oborot\w*|aylanma\w*|выручк\w*|доход\w*|оборот\w*|касс\w*|\brevenue\w*|\bincome\w*|\bsales\b|\bturnover\w*)/gi,
+  exp: /(?:xarajat\w*|chiqim\w*|sarf\w*|расход\w*|затрат\w*|издержк\w*|\bexpense\w*|\bcost\w*|\bspending\w*)/gi,
+};
+
+function getKeywordSpans(
+  text: string,
+  re: RegExp,
+): { start: number; end: number }[] {
+  const result: { start: number; end: number }[] = [];
+  for (const m of text.matchAll(re)) {
+    if (m.index !== undefined) {
+      result.push({ start: m.index, end: m.index + m[0].length });
+    }
+  }
+  return result;
+}
+
+function getRoleAffinity(
+  span: AmountSpan,
+  keywords: { start: number; end: number }[],
+  maxDist = 60,
+): number {
+  let min = Infinity;
+  for (const kw of keywords) {
+    let d = 0;
+    if (span.end <= kw.start) {
+      d = kw.start - span.end;
+    } else if (kw.end <= span.start) {
+      d = span.start - kw.end;
+    }
+    if (d < min) min = d;
+  }
+  if (min > maxDist) return 0;
+  return Math.max(1, maxDist - min);
+}
+
+export function resolveDebtBurdenAmounts(
+  text: string,
+  amounts: number[],
+  spans?: AmountSpan[],
+): DebtBurdenResolvedAmounts {
+  if (amounts.length === 0) return {};
+
+  const actualSpans: AmountSpan[] =
+    spans && spans.length >= amounts.length
+      ? spans
+      : (() => {
+          const extracted = extractNumbers(text).spans;
+          if (extracted && extracted.length >= amounts.length) {
+            return extracted;
+          }
+          return amounts.map((amount, idx) => ({
+            amount,
+            start: idx * 20,
+            end: idx * 20 + 5,
+          }));
+        })();
+
+  const loanKw = getKeywordSpans(text, DEBT_BURDEN_KEYWORDS.loan);
+  const revKw = getKeywordSpans(text, DEBT_BURDEN_KEYWORDS.rev);
+  const expKw = getKeywordSpans(text, DEBT_BURDEN_KEYWORDS.exp);
+
+  if (amounts.length >= 3) {
+    const candidateIndices = [0, 1, 2];
+    let bestScore = -1;
+    let bestAssignment = { r: 0, e: 1, l: 2 };
+
+    for (const r of candidateIndices) {
+      for (const e of candidateIndices) {
+        if (e === r) continue;
+        for (const l of candidateIndices) {
+          if (l === r || l === e) continue;
+
+          const score =
+            getRoleAffinity(actualSpans[r], revKw) +
+            getRoleAffinity(actualSpans[e], expKw) +
+            getRoleAffinity(actualSpans[l], loanKw) +
+            (r === 0 && e === 1 && l === 2 ? 0.1 : 0);
+
+          if (score > bestScore) {
+            bestScore = score;
+            bestAssignment = { r, e, l };
+          }
+        }
+      }
+    }
+
+    return {
+      rev: actualSpans[bestAssignment.r].amount,
+      exp: actualSpans[bestAssignment.e].amount,
+      loanAmt: actualSpans[bestAssignment.l].amount,
+    };
+  }
+
+  if (amounts.length === 2) {
+    const pairs: {
+      revIdx?: number;
+      expIdx?: number;
+      loanIdx?: number;
+      missing: "revenue" | "expenses" | "loan";
+      canonicalBonus: number;
+    }[] = [
+      { revIdx: 0, expIdx: 1, missing: "loan", canonicalBonus: 0.1 },
+      { revIdx: 1, expIdx: 0, missing: "loan", canonicalBonus: 0 },
+      { loanIdx: 0, revIdx: 1, missing: "expenses", canonicalBonus: 0 },
+      { loanIdx: 1, revIdx: 0, missing: "expenses", canonicalBonus: 0 },
+      { loanIdx: 0, expIdx: 1, missing: "revenue", canonicalBonus: 0 },
+      { loanIdx: 1, expIdx: 0, missing: "revenue", canonicalBonus: 0 },
+    ];
+
+    let bestScore = -1;
+    let bestPair = pairs[0];
+
+    for (const p of pairs) {
+      let score = p.canonicalBonus;
+      if (p.revIdx !== undefined)
+        score += getRoleAffinity(actualSpans[p.revIdx], revKw);
+      if (p.expIdx !== undefined)
+        score += getRoleAffinity(actualSpans[p.expIdx], expKw);
+      if (p.loanIdx !== undefined)
+        score += getRoleAffinity(actualSpans[p.loanIdx], loanKw);
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestPair = p;
+      }
+    }
+
+    return {
+      rev:
+        bestPair.revIdx !== undefined
+          ? actualSpans[bestPair.revIdx].amount
+          : undefined,
+      exp:
+        bestPair.expIdx !== undefined
+          ? actualSpans[bestPair.expIdx].amount
+          : undefined,
+      loanAmt:
+        bestPair.loanIdx !== undefined
+          ? actualSpans[bestPair.loanIdx].amount
+          : undefined,
+      missing: bestPair.missing,
+    };
+  }
+
+  return {};
+}
+
 function handleDebtBurden(
+  text: string,
   amounts: number[],
   rate: number | null,
   months: number | null,
-  locale: Locale
+  locale: Locale,
+  spans?: AmountSpan[],
 ): ChatResponsePayload {
   const example =
     locale === "en"
@@ -639,15 +932,29 @@ function handleDebtBurden(
       locale === "en"
         ? "monthly revenue, monthly expenses and the loan amount"
         : "oylik tushum, oylik xarajat va kredit summasi",
-      example
+      example,
     );
   }
 
-  const [rev, exp, loanAmt] = [amounts[0], amounts[1], amounts[2]];
+  const resolved = resolveDebtBurdenAmounts(text, amounts, spans);
 
-  if (loanAmt === undefined) {
-    return askFor(locale, locale === "en" ? "the loan amount" : "kredit summasi", example);
+  if (
+    resolved.loanAmt === undefined ||
+    resolved.rev === undefined ||
+    resolved.exp === undefined
+  ) {
+    let missingLabel: string;
+    if (resolved.missing === "revenue") {
+      missingLabel = locale === "en" ? "monthly revenue" : "oylik tushum";
+    } else if (resolved.missing === "expenses") {
+      missingLabel = locale === "en" ? "monthly expenses" : "oylik xarajat";
+    } else {
+      missingLabel = locale === "en" ? "the loan amount" : "kredit summasi";
+    }
+    return askFor(locale, missingLabel, example);
   }
+
+  const { rev, exp, loanAmt } = resolved;
 
   const annualRate = rate ?? 24;
   const loanMonths = months ?? 24;
@@ -717,7 +1024,7 @@ function handleLoan(
   amounts: number[],
   rate: number | null,
   months: number | null,
-  locale: Locale
+  locale: Locale,
 ): ChatResponsePayload {
   if (amounts.length === 0) {
     return askFor(
@@ -725,7 +1032,7 @@ function handleLoan(
       locale === "en" ? "the loan amount" : "kredit summasi",
       locale === "en"
         ? "If I take a 50M UZS loan for 24 months at 24%, how much do I pay per month?"
-        : "50 mln so‘m kreditni 24 oyga 24% bilan olsam oyiga qancha to‘layman?"
+        : "50 mln so‘m kreditni 24 oyga 24% bilan olsam oyiga qancha to‘layman?",
     );
   }
 
@@ -741,14 +1048,20 @@ function handleLoan(
         ? `${years} yr`
         : `${years.toFixed(1)} yr`
       : Number.isInteger(years)
-      ? `${years} yil`
-      : `${years.toFixed(1)} yil`;
+        ? `${years} yil`
+        : `${years.toFixed(1)} yil`;
 
   const assumedParts: string[] = [];
   if (rate === null)
-    assumedParts.push(locale === "en" ? `annual rate ${annualRate}%` : `yillik foiz ${annualRate}%`);
+    assumedParts.push(
+      locale === "en"
+        ? `annual rate ${annualRate}%`
+        : `yillik foiz ${annualRate}%`,
+    );
   if (months === null)
-    assumedParts.push(locale === "en" ? `term ${loanMonths} months` : `muddat ${loanMonths} oy`);
+    assumedParts.push(
+      locale === "en" ? `term ${loanMonths} months` : `muddat ${loanMonths} oy`,
+    );
 
   const content =
     locale === "en"
@@ -765,7 +1078,7 @@ function handleLoan(
 ${
   assumedParts.length > 0
     ? `\n⚠️ These weren't in your request, so they were assumed: ${assumedParts.join(
-        ", "
+        ", ",
       )}. Send exact numbers and I'll recalculate.`
     : ""
 }
@@ -784,7 +1097,7 @@ ${
 ${
   assumedParts.length > 0
     ? `\n⚠️ So‘rovingizda ko‘rsatilmagani uchun quyidagilar taxminan olindi: ${assumedParts.join(
-        ", "
+        ", ",
       )}. Aniq raqamlarni yozsangiz, qayta hisoblab beraman.`
     : ""
 }
@@ -803,7 +1116,7 @@ ${
             {
               label: "Bussy, can my business carry this loan?",
               prompt: `My monthly revenue is 40M, expenses are 25M. Can I carry a ${formatMoney(
-                loanRes.amount
+                loanRes.amount,
               )} loan over ${loanRes.months} months at ${loanRes.annualRate}%?`,
             },
             { label: "💳 Full loan page", href: "/app/loan" },
@@ -812,7 +1125,7 @@ ${
             {
               label: "Bussy, bu kreditni biznesim ko‘tara oladimi?",
               prompt: `Oylik tushumim 40 mln, xarajatim 25 mln bo‘lsa, ${formatMoney(
-                loanRes.amount
+                loanRes.amount,
               )} kreditni ${loanRes.months} oyga ${loanRes.annualRate}% bilan ko‘tara olamanmi?`,
             },
             { label: "💳 Kredit to‘liq sahifasi", href: "/app/loan" },
@@ -826,10 +1139,12 @@ function handleProfit(amounts: number[], locale: Locale): ChatResponsePayload {
   if (amounts.length < 2) {
     return askFor(
       locale,
-      locale === "en" ? "monthly revenue and monthly expenses" : "oylik tushum va oylik xarajat",
+      locale === "en"
+        ? "monthly revenue and monthly expenses"
+        : "oylik tushum va oylik xarajat",
       locale === "en"
         ? "If monthly revenue is 45M and expenses are 28M UZS, what's my net profit?"
-        : "Oylik tushum 45 mln, xarajat 28 mln so‘m bo‘lsa sof foydam qancha?"
+        : "Oylik tushum 45 mln, xarajat 28 mln so‘m bo‘lsa sof foydam qancha?",
     );
   }
 
@@ -854,13 +1169,13 @@ function handleProfit(amounts: number[], locale: Locale): ChatResponsePayload {
 - **Total cost**: ${formatMoney(profitRes.totalCost)}
 - **Turnover tax (${DEFAULT_TURNOVER_TAX_PERCENT}%)**: ${formatMoney(profitRes.taxAmount)}
 - **Net profit**: **${formatMoney(profitRes.netProfit)}** (Net margin: **${formatPercent(
-          profitRes.netMargin
+          profitRes.netMargin,
         )}**)
 
 💡 **Bussy's analysis**: Your business's net profitability comes to ${formatPercent(
-          profitRes.netMargin
+          profitRes.netMargin,
         )}. Costs were assumed to split ${Math.round(COST_SPLIT.fixed * 100)}% fixed / ${Math.round(
-          COST_SPLIT.variable * 100
+          COST_SPLIT.variable * 100,
         )}% variable — enter your exact line items on the "Financial analysis" page for a more precise number.`
       : `Kiritilgan ko‘rsatkichlar bo‘yicha rentabellik va foyda hisoblandi:
 
@@ -869,15 +1184,15 @@ function handleProfit(amounts: number[], locale: Locale): ChatResponsePayload {
 - **Jami xarajat**: ${formatMoney(profitRes.totalCost)}
 - **Aylanma soliq (${DEFAULT_TURNOVER_TAX_PERCENT}%)**: ${formatMoney(profitRes.taxAmount)}
 - **Sof foyda**: **${formatMoney(profitRes.netProfit)}** (Sof marja: **${formatPercent(
-          profitRes.netMargin
+          profitRes.netMargin,
         )}**)
 
 💡 **Bussy tahlili**: Biznesingiz sof rentabelligi ${formatPercent(
-          profitRes.netMargin
+          profitRes.netMargin,
         )} ni tashkil qilmoqda. Xarajatlar ${Math.round(
-          COST_SPLIT.fixed * 100
+          COST_SPLIT.fixed * 100,
         )}% o‘zgarmas / ${Math.round(
-          COST_SPLIT.variable * 100
+          COST_SPLIT.variable * 100,
         )}% o‘zgaruvchan nisbatda taxmin qilindi — aniq moddalarni "Moliyaviy tahlil" sahifasida kiritsangiz, hisob aniqroq bo‘ladi.`;
 
   return {
@@ -901,14 +1216,19 @@ function handleProfit(amounts: number[], locale: Locale): ChatResponsePayload {
 
 /* ---------- Pul oqimi ---------- */
 
-function handleCashflow(amounts: number[], locale: Locale): ChatResponsePayload {
+function handleCashflow(
+  amounts: number[],
+  locale: Locale,
+): ChatResponsePayload {
   if (amounts.length < 2) {
     return askFor(
       locale,
-      locale === "en" ? "monthly revenue and monthly expenses" : "oylik tushum va oylik xarajat",
+      locale === "en"
+        ? "monthly revenue and monthly expenses"
+        : "oylik tushum va oylik xarajat",
       locale === "en"
         ? "My monthly revenue is 45M, expenses are 28M. What's my cash flow?"
-        : "Oylik tushumim 45 mln, xarajatim 28 mln. Pul oqimim qanday?"
+        : "Oylik tushumim 45 mln, xarajatim 28 mln. Pul oqimim qanday?",
     );
   }
 
@@ -970,14 +1290,20 @@ ${DISCLAIMER.uz}`;
 
 /* ---------- Zararsizlik ---------- */
 
-function handleBreakEven(text: string, amounts: number[], locale: Locale): ChatResponsePayload {
+function handleBreakEven(
+  text: string,
+  amounts: number[],
+  locale: Locale,
+): ChatResponsePayload {
   if (amounts.length === 0) {
     return askFor(
       locale,
-      locale === "en" ? "the monthly fixed cost amount" : "oylik o‘zgarmas xarajat summasi",
+      locale === "en"
+        ? "the monthly fixed cost amount"
+        : "oylik o‘zgarmas xarajat summasi",
       locale === "en"
         ? "My fixed costs are 16M UZS. How many units do I need to sell to break even?"
-        : "O‘zgarmas xarajatim 16 mln so‘m bo‘lsa, zararsizlikka chiqish uchun nechta sotishim kerak?"
+        : "O‘zgarmas xarajatim 16 mln so‘m bo‘lsa, zararsizlikka chiqish uchun nechta sotishim kerak?",
     );
   }
 
@@ -998,7 +1324,10 @@ function handleBreakEven(text: string, amounts: number[], locale: Locale): ChatR
           : "Kiritilgan ma’lumotlar bilan zararsizlik nuqtasini hisoblab bo‘lmadi: bitta mahsulot narxi uning o‘zgaruvchan tannarxidan yuqori bo‘lishi shart. Narx va tannarxni aniq ko‘rsatsangiz, qayta hisoblab beraman.",
       quickActions: [
         {
-          label: locale === "en" ? "📊 Financial analysis page" : "📊 Moliyaviy tahlil sahifasi",
+          label:
+            locale === "en"
+              ? "📊 Financial analysis page"
+              : "📊 Moliyaviy tahlil sahifasi",
           href: "/app/finance",
         },
       ],
@@ -1013,7 +1342,7 @@ function handleBreakEven(text: string, amounts: number[], locale: Locale): ChatR
 - **Average price per ${unit.unitLabel}**: ${formatMoney(breakEvenRes.sellingPrice)}
 - **Cost per ${unit.unitLabel}**: ${formatMoney(breakEvenRes.variableCostPerUnit)}
 - **Contribution margin**: ${formatMoney(breakEvenRes.contributionMargin)} (${formatPercent(
-          breakEvenRes.contributionMarginRatio
+          breakEvenRes.contributionMarginRatio,
         )})
 
 ### 🎯 What you need to hit:
@@ -1028,7 +1357,7 @@ function handleBreakEven(text: string, amounts: number[], locale: Locale): ChatR
 - **O‘rtacha bitta ${unit.unitLabel} narxi**: ${formatMoney(breakEvenRes.sellingPrice)}
 - **Bitta ${unit.unitLabel} tannarxi**: ${formatMoney(breakEvenRes.variableCostPerUnit)}
 - **Marjinal foyda**: ${formatMoney(breakEvenRes.contributionMargin)} (${formatPercent(
-          breakEvenRes.contributionMarginRatio
+          breakEvenRes.contributionMarginRatio,
         )})
 
 ### 🎯 Sizning vazifangiz:
@@ -1063,19 +1392,23 @@ function handleBreakEven(text: string, amounts: number[], locale: Locale): ChatR
 
 /* ---------- Biznes-reja ---------- */
 
-function handleBusinessPlan(text: string, amounts: number[], locale: Locale): ChatResponsePayload {
+function handleBusinessPlan(
+  text: string,
+  amounts: number[],
+  locale: Locale,
+): ChatResponsePayload {
   const unit = resolveUnitEconomics(text, locale);
   const location = /toshkent|tashkent/.test(text)
     ? "Toshkent"
     : /urganch/.test(text)
-    ? "Urganch"
-    : /samarqand/.test(text)
-    ? "Samarqand"
-    : /buxoro|bukhara/.test(text)
-    ? "Buxoro"
-    : locale === "en"
-    ? "City center"
-    : "Shahar markazi";
+      ? "Urganch"
+      : /samarqand/.test(text)
+        ? "Samarqand"
+        : /buxoro|bukhara/.test(text)
+          ? "Buxoro"
+          : locale === "en"
+            ? "City center"
+            : "Shahar markazi";
 
   const initialCapital = amounts[0] ?? 100_000_000;
   const potentialLoan = amounts[1] ?? 0;
@@ -1088,7 +1421,10 @@ function handleBusinessPlan(text: string, amounts: number[], locale: Locale): Ch
     monthlyExpenses: 28_000_000,
     expectedRevenue: 45_000_000,
     employees: 4,
-    targetCustomer: locale === "en" ? "Young people, students and city residents" : "Yoshlar, talabalar va shahar aholisi",
+    targetCustomer:
+      locale === "en"
+        ? "Young people, students and city residents"
+        : "Yoshlar, talabalar va shahar aholisi",
     locale,
   });
 
@@ -1125,24 +1461,38 @@ To‘liq rejani ko‘rish va **PDF formatda yuklab olish** uchun quyidagi tugman
     content,
     quickActions:
       locale === "en"
-        ? [{ label: "📄 Open the business plan & download PDF", href: "/app/business-plan" }]
-        : [{ label: "📄 Biznes-rejani ochish va PDF yuklab olish", href: "/app/business-plan" }],
+        ? [
+            {
+              label: "📄 Open the business plan & download PDF",
+              href: "/app/business-plan",
+            },
+          ]
+        : [
+            {
+              label: "📄 Biznes-rejani ochish va PDF yuklab olish",
+              href: "/app/business-plan",
+            },
+          ],
   };
 }
 
 /* ---------- G'oya / bozor ---------- */
 
-function handleBusinessIdea(text: string, amounts: number[], locale: Locale): ChatResponsePayload {
+function handleBusinessIdea(
+  text: string,
+  amounts: number[],
+  locale: Locale,
+): ChatResponsePayload {
   const unit = resolveUnitEconomics(text, locale);
   const location = /urganch/.test(text)
     ? "Urganch"
     : /toshkent|tashkent/.test(text)
-    ? "Toshkent"
-    : /samarqand/.test(text)
-    ? "Samarqand"
-    : locale === "en"
-    ? "Cities in Uzbekistan"
-    : "O‘zbekiston shaharlari";
+      ? "Toshkent"
+      : /samarqand/.test(text)
+        ? "Samarqand"
+        : locale === "en"
+          ? "Cities in Uzbekistan"
+          : "O‘zbekiston shaharlari";
 
   // Byudjet ko'rsatilmasa — moliyaviy prognozsiz, faqat sifat tahlili beramiz.
   // (Raqamni o'ylab topmaymiz, lekin foydali javobni ham bermay qo'ymaymiz.)
@@ -1309,11 +1659,13 @@ Savolingizda aniq raqamlarni yozsangiz (masalan "45 mln" yoki "45 000 000"), men
             },
             {
               label: "💳 Calculate a loan",
-              prompt: "If I take a 50M UZS loan for 24 months at 24%, how much do I pay per month?",
+              prompt:
+                "If I take a 50M UZS loan for 24 months at 24%, how much do I pay per month?",
             },
             {
               label: "📊 Calculate profit",
-              prompt: "If monthly revenue is 45M and expenses are 28M UZS, what's my profit?",
+              prompt:
+                "If monthly revenue is 45M and expenses are 28M UZS, what's my profit?",
             },
           ]
         : [
@@ -1324,11 +1676,13 @@ Savolingizda aniq raqamlarni yozsangiz (masalan "45 mln" yoki "45 000 000"), men
             },
             {
               label: "💳 Kreditni hisoblash",
-              prompt: "50 mln so‘m kreditni 24 oyga 24% bilan olsam oyiga qancha to‘layman?",
+              prompt:
+                "50 mln so‘m kreditni 24 oyga 24% bilan olsam oyiga qancha to‘layman?",
             },
             {
               label: "📊 Foydani hisoblash",
-              prompt: "Oylik tushum 45 mln, xarajat 28 mln so‘m bo‘lsa foydam qancha?",
+              prompt:
+                "Oylik tushum 45 mln, xarajat 28 mln so‘m bo‘lsa foydam qancha?",
             },
           ],
   };

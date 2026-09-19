@@ -36,7 +36,7 @@ function save() {
         isMinimized: state.isMinimized,
         currentStep: state.currentStep,
         visitedSteps: state.visitedSteps,
-      })
+      }),
     );
   } catch {
     // ignore
@@ -126,17 +126,23 @@ export const demoStore = {
   },
 };
 
+const DEFAULT_SERVER_SNAPSHOT: DemoGuideState = {
+  isOpen: false,
+  isMinimized: false,
+  currentStep: 1,
+  visitedSteps: [1],
+  showReliabilityModal: false,
+};
+
+function getDemoServerSnapshot(): DemoGuideState {
+  return DEFAULT_SERVER_SNAPSHOT;
+}
+
 export function useDemoGuide() {
   const snapshot = useSyncExternalStore(
     demoStore.subscribe,
     demoStore.getSnapshot,
-    () => ({
-      isOpen: false,
-      isMinimized: false,
-      currentStep: 1,
-      visitedSteps: [1],
-      showReliabilityModal: false,
-    })
+    getDemoServerSnapshot,
   );
 
   return {
