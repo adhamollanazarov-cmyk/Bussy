@@ -24,13 +24,35 @@ export const HARD_MESSAGE_LIMIT = 200;
 /** Agent bitta savolga necha marta vosita chaqira olishi. */
 export const MAX_AGENT_STEPS = 5;
 
+/**
+ * Juda uzun matnni RAD ETMAYDI, kesadi.
+ *
+ * Ilgari bu yerda `.max(MAX_MESSAGE_CHARS)` turardi va sxema so'rovni
+ * `trimConversation` ishga tushishidan OLDIN rad etardi. Mijoz
+ * (`app/app/chat/page.tsx`) har bir so'rovda butun tarixni qaytarib
+ * yuboradi, shuning uchun 4 000 belgidan uzun BITTA assistent javobi
+ * keyingi barcha so'rovlarni 400 ga olib kelardi — foydalanuvchi sahifani
+ * yangilamaguncha chat butunlay ishlamay qolardi. Striming yo'lida javoblar
+ * uzunroq bo'ladi, ya'ni bu holatga tushish ehtimoli yuqoriroq.
+ *
+ * Endi 400 faqat haqiqatan yaroqsiz tana uchun qoladi: noto'g'ri `role`,
+ * bo'sh `content`, JSON bo'lmagan tana.
+ */
+function truncateContent(text: string): string {
+  return text.length > MAX_MESSAGE_CHARS
+    ? text.slice(0, MAX_MESSAGE_CHARS)
+    : text;
+}
+
 const ChatMessageSchema = z.object({
   role: z.enum(["user", "assistant"]),
-  content: z.string().min(1).max(MAX_MESSAGE_CHARS),
+  // `min(1)` kesishdan OLDIN tekshiriladi — bo'sh xabar hamon rad etiladi.
+  content: z.string().min(1).transform(truncateContent),
 });
 
 export const ChatRequestSchema = z.object({
-  userMessage: z.string().max(MAX_MESSAGE_CHARS).optional(),
+  userMessage: z.string().transform(truncateContent).optional(),
+  // Tarix hajmi chegarasi saqlanadi: bu DoS himoyasi, uzunlik masalasi emas.
   messages: z.array(ChatMessageSchema).max(HARD_MESSAGE_LIMIT).optional(),
   locale: z.enum(["uz", "en"]).optional(),
   stream: z.boolean().optional(),

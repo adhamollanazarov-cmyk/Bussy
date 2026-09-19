@@ -237,6 +237,34 @@ describe("agent tsikli", () => {
     expect(events.some((e) => e.type === "error")).toBe(false);
   });
 
+  it("striming javobi buferlanmaslik sarlavhalari bilan keladi", async () => {
+    delete process.env.OPENAI_API_KEY;
+
+    const res = await POST(
+      makeRequest({
+        userMessage: "50 mln so‘m kredit 24 oyga 24%",
+        stream: true,
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/event-stream");
+    // Buferlovchi proksi qadamlarni oxirida birdan bermasligi uchun
+    expect(res.headers.get("x-accel-buffering")).toBe("no");
+    expect(res.headers.get("cache-control")).toContain("no-transform");
+
+    // Oqim hamon qadamlarni ketma-ket beradi
+    const text = await res.text();
+    const events = text
+      .split("\n\n")
+      .map((b) => b.trim())
+      .filter((b) => b.startsWith("data:"))
+      .map((b) => JSON.parse(b.replace(/^data:\s*/, "")));
+
+    expect(events.filter((e) => e.type === "step").length).toBeGreaterThan(0);
+    expect(events.some((e) => e.type === "done")).toBe(true);
+  });
+
   it("kalit bo'lmasa OpenAI ga umuman murojaat qilmaydi", async () => {
     delete process.env.OPENAI_API_KEY;
 

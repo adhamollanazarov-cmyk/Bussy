@@ -24,7 +24,27 @@ import {
    turlarini generatsiya qilishda xatolikka olib keladi.
    ============================================================ */
 
-const OPENAI_TIMEOUT_MS = 30_000;
+/**
+ * Serverless funksiyaning eng ko'p bajarilish vaqti (sekundda).
+ *
+ * Bu HTTP metod eksporti emas, balki Next.js ning shtatli "route segment
+ * config" eksporti — `route.ts` uchun hujjatlashtirilgan va `next build`
+ * route turlarini generatsiya qilishga xalaqit bermaydi.
+ * Ruxsat etilganlari: `runtime`, `preferredRegion`, `dynamicParams`,
+ * `maxDuration`. Boshqa har qanday eksport buildni buzadi.
+ */
+export const maxDuration = 60;
+
+/**
+ * Bitta OpenAI chaqiruvining kutish vaqti.
+ *
+ * Agent tsikli bitta savolga MAX_AGENT_STEPS (5) martagacha OpenAI ga
+ * murojaat qiladi. 30 sekundda serverless funksiya javob o'rtasida
+ * o'ldirilishi mumkin edi: 5 × 30 s = 150 s > maxDuration. 15 sekundda
+ * eng yomon holat ham chegara ichida qoladi va sekin javob zaxira
+ * dvigatelga tezroq tushadi.
+ */
+const OPENAI_TIMEOUT_MS = 15_000;
 const OPENAI_MODEL = "gpt-4o-mini";
 
 import {
@@ -353,6 +373,10 @@ export async function POST(req: NextRequest) {
           "Content-Type": "text/event-stream; charset=utf-8",
           "Cache-Control": "no-cache, no-transform",
           Connection: "keep-alive",
+          // Buferlovchi proksi (nginx) oqimni to'plab, barcha qadamlarni
+          // oxirida birdan bermasligi uchun — aks holda agent progressi
+          // productionda ko'rinmay qoladi.
+          "X-Accel-Buffering": "no",
         },
       });
     }
